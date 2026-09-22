@@ -79,6 +79,7 @@
     </div>
     <figcaption id="cap">Drag to orbit, scroll to zoom. Nothing is re-estimated here: every position
     comes from the released annotation files.</figcaption>
+    <p class="note" id="gpuNote"></p>
   </figure>
 
   <div class="legend" style="margin-top:12px" id="legend"></div>
@@ -218,10 +219,57 @@ $('camHint').textContent = CAM_MODES[0][2];
 /* ---------- three.js scaffolding (built once, refilled per recording) ---------- */
 
 const host = $('view');
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+
+/* WebGL is not a given: graphics acceleration can be off, a GPU can be blocklisted, and a driver
+   can reset while the page is open. Say which of those happened rather than showing a black
+   rectangle — and if the browser only offers software rendering, warn that it will be slow. */
+const GPU = HOT3D.gpu();
+const statusNow = $('status');
+if (!GPU.ok) {
+  statusNow.hidden = false;
+  statusNow.textContent = HOT3D.gpuNote(GPU);
+  throw new Error(`no WebGL: ${GPU.reason}`);
+}
+
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+} catch (e) {
+  try {   // second chance without antialiasing: some drivers refuse only the multisampled buffer
+    renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true, powerPreference: 'default' });
+  } catch (e2) {
+    statusNow.hidden = false;
+    statusNow.textContent = `the 3D view could not start: ${e2.message}. ${HOT3D.gpuNote(GPU)}`;
+    throw e2;
+  }
+}
+// a software rasteriser struggles with 60k points at full device pixel ratio
+renderer.setPixelRatio(GPU.software ? 1 : Math.min(devicePixelRatio || 1, 2));
 renderer.setSize(host.clientWidth, host.clientHeight, false);
 host.append(renderer.domElement);
+
+const gpuNoteEl = $('gpuNote');
+if (gpuNoteEl) {
+  gpuNoteEl.textContent = HOT3D.gpuNote(GPU);
+  if (GPU.software) gpuNoteEl.className = 'warn-box';
+}
+
+/* The GPU can be taken away mid-session — a driver reset, a laptop switching cards, or too many
+   live contexts across tabs. Without preventDefault the context never comes back. */
+let contextLost = false;
+HOT3D.watchContext(renderer.domElement, {
+  onLost: () => {
+    contextLost = true;
+    statusNow.hidden = false;
+    statusNow.textContent = 'the browser dropped this page\'s graphics context — waiting for it to ' +
+      'come back. If it does not, reload the page.';
+  },
+  onRestored: () => {
+    contextLost = false;
+    statusNow.hidden = true;
+    if (view.seq) load(view.seq);     // rebuild the scene: every GPU resource died with the context
+  },
+});
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, host.clientWidth / Math.max(host.clientHeight, 1), 0.03, 80);
@@ -908,6 +956,9 @@ function applyCameraMode() {
 let last = performance.now(), acc = 0;
 function tick(now) {
   requestAnimationFrame(tick);
+  // while the context is gone every GL call is a no-op that still costs time, and playback would
+  // silently run on without drawing; hold the frame until the browser hands the GPU back
+  if (contextLost) { last = now; return; }
   const dt = Math.min((now - last) / 1000, 0.25); last = now;
   if (view.playing && rig) {
     acc += dt * rig.fps;

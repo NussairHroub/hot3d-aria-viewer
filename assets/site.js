@@ -349,6 +349,79 @@ const HOT3D = (() => {
     check();
   }
 
+  /* ---------- graphics ----------
+     The 3D pages depend on WebGL, which is not a given in a browser: hardware acceleration can
+     be switched off, a GPU can be blocklisted, a driver can reset, and a tab can be dropped to
+     software rendering mid-session. These two helpers let a page say so plainly instead of
+     showing a black rectangle. */
+
+  /** What this browser would render 3D with, and whether that is going to hurt. */
+  function gpu() {
+    if (typeof WebGLRenderingContext === 'undefined') {
+      return { ok: false, reason: 'this browser has no WebGL at all' };
+    }
+    let canvas, gl;
+    try {
+      canvas = document.createElement('canvas');
+      gl = canvas.getContext('webgl2') || canvas.getContext('webgl') ||
+           canvas.getContext('experimental-webgl');
+    } catch (e) {
+      return { ok: false, reason: `creating a WebGL context threw: ${e.message}` };
+    }
+    if (!gl) {
+      return { ok: false, reason: 'the browser refused a WebGL context (graphics acceleration is ' +
+                                  'usually the reason)' };
+    }
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    const renderer = (dbg && gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) || '';
+    const vendor = (dbg && gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL)) || '';
+    const info = {
+      ok: true, renderer, vendor,
+      version: gl.getParameter(gl.VERSION),
+      // Chrome names its software rasteriser SwiftShader; other browsers use llvmpipe or
+      // "Microsoft Basic Render Driver". Any of them means the CPU is drawing every pixel.
+      software: /swiftshader|llvmpipe|software|basic render|microsoft basic/i.test(renderer),
+    };
+    // release the probe: browsers cap how many WebGL contexts may be alive, and silently kill
+    // the oldest when a page goes over, which is one way a canvas turns black
+    const lose = gl.getExtension('WEBGL_lose_context');
+    if (lose) lose.loseContext();
+    return info;
+  }
+
+  /** Report the GPU dropping and coming back. Returns a function that detaches the listeners. */
+  function watchContext(canvas, { onLost, onRestored } = {}) {
+    if (!canvas) return () => {};
+    const lost = (e) => {
+      // without preventDefault the context is gone for good and can never be restored
+      e.preventDefault();
+      if (onLost) onLost();
+    };
+    const restored = () => { if (onRestored) onRestored(); };
+    canvas.addEventListener('webglcontextlost', lost, false);
+    canvas.addEventListener('webglcontextrestored', restored, false);
+    return () => {
+      canvas.removeEventListener('webglcontextlost', lost);
+      canvas.removeEventListener('webglcontextrestored', restored);
+    };
+  }
+
+  /** One sentence naming the renderer, plus advice when the browser is drawing in software. */
+  function gpuNote(info) {
+    const g = info || gpu();
+    if (!g.ok) {
+      return `3D cannot run here: ${g.reason}. In Chrome, check chrome://gpu, and turn on ` +
+             `Settings → System → "Use graphics acceleration when available", then restart the ` +
+             `browser.`;
+    }
+    const name = g.renderer || g.version || 'an unnamed renderer';
+    return g.software
+      ? `Rendering in software (${name}) — the browser is drawing every pixel on the CPU, so this ` +
+        `page will be slow and may stutter. In Chrome, turn on Settings → System → "Use graphics ` +
+        `acceleration when available" and restart it; chrome://gpu says why it is off.`
+      : `Rendering with ${name}.`;
+  }
+
   function init(footerExtra) {
     restoreTheme();
     if (document.readyState === 'loading') {
@@ -357,6 +430,7 @@ const HOT3D = (() => {
   }
 
   return { init, mountHeader, mountFooter, restoreTheme, f32, u8, json, index, sequence, hands, whenVisible,
+           gpu, gpuNote, watchContext,
            quatToMat3, applyPose, dist, pathLength, fmt, css, channel, linePlot, playhead, PAGES };
 })();
 

@@ -56,6 +56,7 @@
   so the page never holds all 33 meshes at once. Each preview is framed to its own model's
   bounding box so that the model fills the card, so apparent size says nothing about real size —
   compare the quoted diagonals instead.</p>
+  <p class="note" id="gpuNote"></p>
   <div class="row" id="galCtl">
     <label class="field">sort by
       <select id="galSort">
@@ -388,15 +389,31 @@ window.previewsRunning = true;
 /* One renderer for all 33 previews: each visible card is rendered into it and the result is
    copied into that card's own 2D canvas, so only one WebGL context is ever created. */
 let renderer, envMap;
+const GPU = HOT3D.gpu();
+if (!GPU.ok) {
+  // no context to be had: say which browser setting causes it instead of leaving 33 blank cards
+  slots.forEach((s) => note(s, 'no 3D preview — see the note above the gallery'));
+  const gn = document.getElementById('gpuNote');
+  if (gn) { gn.textContent = HOT3D.gpuNote(GPU); gn.className = 'warn-box'; }
+  throw new Error(`no WebGL: ${GPU.reason}`);
+}
 try {
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true, powerPreference: 'low-power' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer = new THREE.WebGLRenderer({ antialias: !GPU.software, alpha: true, preserveDrawingBuffer: true, powerPreference: 'low-power' });
+  renderer.setPixelRatio(GPU.software ? 1 : Math.min(window.devicePixelRatio || 1, 2));
   renderer.setClearAlpha(0);
   const pmrem = new THREE.PMREMGenerator(renderer);
   envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
   pmrem.dispose();
+  const gn = document.getElementById('gpuNote');
+  if (gn) {
+    gn.textContent = HOT3D.gpuNote(GPU) +
+      ' All 33 previews share this one context, so the browser is never asked for more than one.';
+    if (GPU.software) gn.className = 'warn-box';
+  }
 } catch (e) {
   slots.forEach((s) => note(s, 'WebGL unavailable in this browser'));
+  const gn = document.getElementById('gpuNote');
+  if (gn) { gn.textContent = `${e.message}. ${HOT3D.gpuNote(GPU)}`; gn.className = 'warn-box'; }
   throw e;
 }
 
@@ -515,9 +532,31 @@ function flush() {
   for (const el of todo) paint(el);
 }
 
+/* The shared context can be taken away — a driver reset, or the browser reclaiming contexts from
+   a background tab. Painting into a dead context yields a blank card, so previews pause and are
+   repainted once it is back. */
+let ctxLost = false;
+HOT3D.watchContext(renderer.domElement, {
+  onLost: () => {
+    ctxLost = true;
+    const gn = document.getElementById('gpuNote');
+    if (gn) {
+      gn.textContent = 'the browser dropped this page\'s graphics context; previews are paused ' +
+        'until it returns. If they stay blank, reload the page.';
+      gn.className = 'warn-box';
+    }
+  },
+  onRestored: () => {
+    ctxLost = false;
+    const gn = document.getElementById('gpuNote');
+    if (gn) { gn.textContent = HOT3D.gpuNote(GPU); gn.className = 'note'; }
+    for (const el of live.keys()) schedule(el);   // repaint everything that is still on screen
+  },
+});
+
 function paint(el) {
   const st = live.get(el);
-  if (!st || st.status !== 'live') return;
+  if (ctxLost || !st || st.status !== 'live') return;
   const canvas = el.querySelector('canvas');
   const w = Math.max(el.clientWidth, 1), h = Math.max(el.clientHeight, 1);
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
