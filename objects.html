@@ -387,17 +387,11 @@ setTimeout(() => {
 }, 9000);
 </script>
 
-<script type="importmap">
-{ "imports": {
-  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-} }
-</script>
 <script type="module">
-import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import * as THREE from './assets/vendor/three/three.module.js';
+import { GLTFLoader } from './assets/vendor/three/addons/GLTFLoader.js';
+import { OrbitControls } from './assets/vendor/three/addons/OrbitControls.js';
+import { RoomEnvironment } from './assets/vendor/three/addons/RoomEnvironment.js';
 
 await window.galleryReady;
 

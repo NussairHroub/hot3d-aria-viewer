@@ -42,14 +42,6 @@
   .yes { color: var(--ok); } .no { color: var(--muted); }
   @media (max-width: 720px) { .readout { grid-template-columns: minmax(0, 1fr); } }
 </style>
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-  }
-}
-</script>
 </head>
 <body>
 <main class="wrap">
@@ -166,18 +158,20 @@
 
 <script>
 HOT3D.init();
-/* If the module below never runs — three.js blocked, no import-map support — say so in the
-   viewport instead of leaving it on "loading…" for ever. */
+/* three.js is served from this site (assets/vendor/three), so no third-party CDN and no
+   import map are involved. If the module still never runs — a browser without ES modules, or a
+   half-fetched file — say so in the viewport instead of leaving it on "loading…" for ever. */
 setTimeout(function () {
   if (window.scene3dStarted) return;
   var s = document.getElementById('status');
   s.hidden = false;
-  s.textContent = 'the 3D view could not start: three.js did not load from cdn.jsdelivr.net.';
+  s.textContent = 'the 3D view could not start: assets/vendor/three/three.module.js did not load. '
+    + 'Reload the page; if it keeps failing, the browser may be too old for ES modules.';
 }, 12000);
 </script>
 <script type="module">
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import * as THREE from './assets/vendor/three/three.module.js';
+import { OrbitControls } from './assets/vendor/three/addons/OrbitControls.js';
 window.scene3dStarted = true;
 
 /* The twelve Aria recordings that ship a full payload (data/seq/<seq>.json). */

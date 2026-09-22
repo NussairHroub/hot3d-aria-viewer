@@ -98,13 +98,84 @@ const HOT3D = (() => {
   /** base64 uint8 -> Uint8Array (1 true, 0 false, 255 not annotated) */
   const u8 = (b64) => bytes(b64);
 
+  /* A payload is several megabytes, so a slow link can look like a hung page. Every fetch that
+     goes through json() reports its bytes to one shared bar under the header: the reader sees
+     movement, and a stall is visibly a stall rather than a mystery. */
+  const inflight = new Map();
+  let bar = null;
+
+  function progressBar() {
+    if (bar) return bar;
+    bar = document.createElement('div');
+    bar.id = 'hot3d-progress';
+    bar.setAttribute('role', 'status');
+    bar.innerHTML = '<span class="pg-track"><span class="pg-fill"></span></span><span class="pg-text"></span>';
+    Object.assign(bar.style, {
+      position: 'fixed', left: '0', right: '0', top: '0', zIndex: '60',
+      display: 'none', alignItems: 'center', gap: '10px', padding: '5px 14px',
+      font: '12px/1.4 var(--mono, monospace)', color: 'var(--ink-2)',
+      background: 'var(--surface)', borderBottom: '1px solid var(--line)',
+    });
+    const track = bar.querySelector('.pg-track');
+    Object.assign(track.style, { flex: '1', height: '3px', background: 'var(--surface-2)', borderRadius: '2px', overflow: 'hidden' });
+    Object.assign(bar.querySelector('.pg-fill').style, { display: 'block', height: '100%', width: '0%', background: 'var(--accent)' });
+    document.body.append(bar);
+    return bar;
+  }
+
+  function renderProgress() {
+    const b = progressBar();
+    if (!inflight.size) { b.style.display = 'none'; return; }
+    let loaded = 0, total = 0, unknown = false;
+    for (const s of inflight.values()) {
+      loaded += s.loaded;
+      if (s.total) total += s.total; else unknown = true;
+    }
+    const mb = (n) => (n / 1e6).toFixed(1);
+    b.style.display = 'flex';
+    b.querySelector('.pg-fill').style.width =
+      total && !unknown ? `${Math.min(100, 100 * loaded / total).toFixed(1)}%` : '100%';
+    b.querySelector('.pg-text').textContent = total && !unknown
+      ? `loading ${mb(loaded)} / ${mb(total)} MB`
+      : `loading ${mb(loaded)} MB`;
+  }
+
+  async function fetchJsonWithProgress(path) {
+    const res = await fetch(path);
+    if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
+    const total = Number(res.headers.get('content-length')) || 0;
+    if (!res.body || !res.body.getReader) return res.json();   // older browsers: no stream, no bar
+    const state = { loaded: 0, total };
+    inflight.set(path, state);
+    renderProgress();
+    try {
+      const reader = res.body.getReader();
+      const chunks = [];
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        state.loaded += value.length;
+        renderProgress();
+      }
+      let size = 0;
+      for (const c of chunks) size += c.length;
+      const buf = new Uint8Array(size);
+      let at = 0;
+      for (const c of chunks) { buf.set(c, at); at += c.length; }
+      return JSON.parse(new TextDecoder().decode(buf));
+    } finally {
+      inflight.delete(path);
+      renderProgress();
+    }
+  }
+
   const cache = new Map();
   async function json(path) {
     if (!cache.has(path)) {
-      cache.set(path, fetch(path).then(r => {
-        if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
-        return r.json();
-      }));
+      // a failed fetch must not be cached as a permanent failure: drop it so a retry can work
+      const p = fetchJsonWithProgress(path).catch(err => { cache.delete(path); throw err; });
+      cache.set(path, p);
     }
     return cache.get(path);
   }
