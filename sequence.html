@@ -93,6 +93,7 @@
         <label class="toggle"><input type="checkbox" id="tObj" checked><span class="swatch" style="background:var(--c-object)"></span>Object boxes</label>
         <label class="toggle"><input type="checkbox" id="tHand" checked><span class="swatch" style="background:var(--c-hand)"></span>Hand boxes</label>
         <label class="toggle"><input type="checkbox" id="tAxes"><span class="swatch" style="background:linear-gradient(90deg,#e5484d 33%,#3fb950 33% 66%,#4c8dff 66%)"></span>Object axes</label>
+      <label class="toggle"><input type="checkbox" id="tHAxes"><span class="swatch" style="background:linear-gradient(90deg,#e5484d 33%,#3fb950 33% 66%,#4c8dff 66%)"></span>Hand axes</label>
       <label class="toggle"><input type="checkbox" id="tQa" checked>QA badge</label>
       </div>
       <div class="toggles" id="objToggles"></div>
@@ -151,7 +152,7 @@ const $ = (id) => document.getElementById(id);
 const sel = $('seqSel'), statusEl = $('status'), pills = $('pills');
 const stage = $('stage'), vid = $('vid'), ov = $('ov'), octx = ov.getContext('2d');
 const playBtn = $('playBtn'), scrub = $('scrub'), tRead = $('tRead');
-const tObj = $('tObj'), tHand = $('tHand'), tQa = $('tQa'), tAxes = $('tAxes');
+const tObj = $('tObj'), tHand = $('tHand'), tQa = $('tQa'), tAxes = $('tAxes'), tHAxes = $('tHAxes');
 const objToggles = $('objToggles'), readout = $('readout'), legend = $('distLegend');
 const chSpeed = $('chSpeed'), chDist = $('chDist');
 const CAP0 = { cap: $('cap').innerHTML, capSpeed: $('capSpeed').innerHTML, capDist: $('capDist').innerHTML };
@@ -275,7 +276,8 @@ function decode(d, hd) {
     const h = hd.hands[side];
     st.hands[side] = {
       side,
-      ume: { t: HOT3D.f32(h.umetrack.wrist_t, 3), conf: HOT3D.f32(h.umetrack.conf) },
+      ume: { t: HOT3D.f32(h.umetrack.wrist_t, 3), q: HOT3D.f32(h.umetrack.wrist_q, 4),
+             conf: HOT3D.f32(h.umetrack.conf) },
       box: HOT3D.f32(h.boxes.rgb.xyxy, 4), vis: HOT3D.f32(h.boxes.rgb.vis),
     };
   }
@@ -483,7 +485,17 @@ function arrow(x0, y0, x1, y1, color) {
 
 function drawAxes(o, i, s) {
   if (!S.proj || !isFinite(o.T[i][0]) || !isFinite(o.Q[i][0])) return;
-  const T = o.T[i], Q = o.Q[i], L = axisLength(o);
+  poseAxes(o.T[i], o.Q[i], axisLength(o), i, s);
+}
+
+/** the wrist carries a full rotation too, so it gets the same axes as an object */
+function drawHandAxes(h, i, s) {
+  const T = h.ume.t[i], Q = h.ume.q ? h.ume.q[i] : null;
+  if (!S.proj || !Q || !isFinite(T[0]) || !isFinite(Q[0])) return;
+  poseAxes(T, Q, 0.055, i, s);
+}
+
+function poseAxes(T, Q, L, i, s) {
   const m = HOT3D.quatToMat3(Q);
   const origin = S.proj.world(T, S.hT[i], S.hQ[i]);
   if (!origin) return;                                        // the object is behind the camera
@@ -524,6 +536,9 @@ function drawOverlay(i) {
   }
   if (tAxes.checked) {
     for (const o of S.objects) if (o.on) drawAxes(o, i, s);
+  }
+  if (tHAxes.checked) {
+    for (const side of ['left', 'right']) drawHandAxes(S.hands[side], i, s);
   }
   if (tHand.checked) {
     for (const side of ['left', 'right']) {
@@ -765,7 +780,9 @@ async function load(seq) {
       `<b>Object axes</b> are the released 6-DoF pose drawn in the image: each object's own X ` +
       `(<span style="color:#e5484d">red</span>), Y (<span style="color:#3fb950">green</span>) and ` +
       `Z (<span style="color:#4c8dff">blue</span>) at that frame, projected with the recording's ` +
-      `own FISHEYE624 calibration. Nothing is fitted — the orientation is the motion capture's.`;
+      `own FISHEYE624 calibration. <b>Hand axes</b> are the same for each wrist, from UmeTrack's ` +
+      `<span class="mono">wrist_q</span> in the separately licensed hand file. Nothing is fitted ` +
+      `— the orientation is the motion capture's.`;
     $('capSpeed').innerHTML =
       `Headset speed in m/s for <span class="mono">${seq}</span>, a central difference of the ` +
       `motion-capture headset track at ${S.fps.toFixed(0)} fps. Click to seek.`;
@@ -799,7 +816,7 @@ addEventListener('hashchange', () => {
 
 /* The overlay toggles only took effect on the next frame the video happened to draw, so
    flipping one while paused looked like it did nothing. Redraw on the spot. */
-for (const t of [tObj, tHand, tQa, tAxes]) {
+for (const t of [tObj, tHand, tQa, tAxes, tHAxes]) {
   t.addEventListener('change', () => drawOverlay(cur));
 }
 

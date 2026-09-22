@@ -131,7 +131,7 @@
         <tr><td>RGB field</td><td class="mono">cameras[camera-rgb]</td><td>The released <span class="mono">T_Device_Camera</span> applied to the headset pose; the cone half-angle is the released <span class="mono">maxSolidAngle</span>, not a guess.</td></tr>
         <tr><td>Objects</td><td class="mono">objects[].T, .Q</td><td>An oriented box with the object's <span class="mono">extent_m</span> from <span class="mono">data/objects.json</span>, centred on the model's own bounding-box centre, placed by the released pose.</td></tr>
         <tr><td>Object axes</td><td class="mono">objects[].T, .Q</td><td>The same released pose drawn as the object's own axes — X <span style="color:#e5484d">red</span>, Y <span style="color:#3fb950">green</span>, Z <span style="color:#4c8dff">blue</span> — as solid arrows, each half the object's longest side. Orientation is what a wireframe box cannot show; the axes are the model frame the release ships, so they are comparable across frames of one object, not between different objects.</td></tr>
-        <tr><td>Wrists</td><td class="mono">hands.{left,right}.umetrack<br>in data/hands/&lt;seq&gt;.hands.json</td><td>A sphere at <span class="mono">wrist_t</span>, a cross showing the three axes of <span class="mono">wrist_q</span>, and a one-second trailing path. This is the one layer that comes from a second file: hand annotations carry their own licence, so they are never merged into the payload.</td></tr>
+        <tr><td>Wrists</td><td class="mono">hands.{left,right}.umetrack<br>in data/hands/&lt;seq&gt;.hands.json</td><td>A sphere at <span class="mono">wrist_t</span>, the wrist's own axes from <span class="mono">wrist_q</span> drawn as solid arrows in the same X&nbsp;<span style="color:#e5484d">red</span>, Y&nbsp;<span style="color:#3fb950">green</span>, Z&nbsp;<span style="color:#4c8dff">blue</span> convention as the objects, and a one-second trailing path. This is the one layer that comes from a second file: hand annotations carry their own licence, so they are never merged into the payload.</td></tr>
         <tr><td>MPS SLAM</td><td class="mono">slam.T</td><td>A dashed line through the headset's own closed-loop trajectory, sampled at frame times.</td></tr>
       </tbody>
     </table>
@@ -539,7 +539,7 @@ async function load(seq) {
      from cylinders and cones rather than lines: a line is one device pixel wide no matter what
      linewidth says, which is why the wireframe boxes read as scribble. */
   const AXIS_RGB = [0xe5484d, 0x3fb950, 0x4c8dff];          // X, Y, Z — the usual convention
-  function axisTriad(len) {
+  function axisTriad(len, withBall = true) {
     const g = new THREE.Group();
     const shaft = Math.max(len * 0.035, 0.0035);            // scales with the object, with a floor
     for (let a = 0; a < 3; a++) {
@@ -556,8 +556,10 @@ async function load(seq) {
       g.add(arm);
     }
     // a small ball at the origin, so the pose's position reads even when the arms are foreshortened
-    g.add(new THREE.Mesh(new THREE.SphereGeometry(Math.max(len * 0.06, 0.005), 12, 10),
-                         new THREE.MeshBasicMaterial({ color: 0xffffff })));
+    if (withBall) {
+      g.add(new THREE.Mesh(new THREE.SphereGeometry(Math.max(len * 0.06, 0.005), 12, 10),
+                           new THREE.MeshBasicMaterial({ color: 0xffffff })));
+    }
     return g;
   }
 
@@ -605,12 +607,10 @@ async function load(seq) {
     const node = new THREE.Group();
     const ball = new THREE.Mesh(new THREE.SphereGeometry(0.018, 18, 12),
       new THREE.MeshBasicMaterial({ color: col('--c-hand') }));
-    const cross = new THREE.LineSegments(
-      new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(
-        [-0.03, 0, 0, 0.03, 0, 0, 0, -0.03, 0, 0, 0.03, 0, 0, 0, -0.03, 0, 0, 0.03], 3)),
-      new THREE.LineBasicMaterial({ color: col('--c-hand'), transparent: true, opacity: 0.7 }));
-    ball.userData.colorVar = cross.userData.colorVar = '--c-hand';
-    node.add(ball, cross);
+    // the wrist's own axes, same convention and same solid geometry as the objects
+    const triad = axisTriad(0.055, false);
+    ball.userData.colorVar = '--c-hand';
+    node.add(ball, triad);
     const trailPos = new Float32Array(TRAIL * 6);
     const tg = new THREE.BufferGeometry();
     tg.setAttribute('position', new THREE.BufferAttribute(trailPos, 3));
