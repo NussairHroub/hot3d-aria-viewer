@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cameras · HOT3D Aria</title>
+<meta name="description" content="The Aria camera rig as HOT3D releases it: one RGB and two monochrome SLAM streams, the per-recording fisheye calibration, the extrinsics on the glasses, and the rotation convention every image on this site follows.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+<style>
+  .streams { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); align-items: start; }
+  .shot { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .shot img { display: block; width: 100%; height: auto; }
+  .shot .ph { aspect-ratio: 3 / 4; display: grid; place-items: center; color: var(--muted); font-family: var(--mono); font-size: 12px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 13px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .coefs { display: grid; gap: 6px; margin-top: 10px; }
+  .coefs .grp { display: grid; grid-template-columns: 58px 1fr; gap: 8px; align-items: baseline; }
+  .coefs .gl { color: var(--muted); font-size: 11.5px; }
+  .coefs .gv { display: flex; flex-wrap: wrap; gap: 4px; }
+  .coefs code { font-family: var(--mono); font-size: 11.5px; background: var(--surface-2); border-radius: 4px; padding: 1px 5px; color: var(--ink-2); }
+  .rig-box { padding: 6px; }
+  .rig { display: block; width: 100%; min-width: 600px; max-width: 760px; height: auto; margin: 0 auto; color: var(--ink-2); }
+  .rig .frame { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .rig .frame.fill { fill: var(--surface-2); }
+  .rig .dim { stroke: currentColor; stroke-width: 1; opacity: .6; }
+  .rig .lead { stroke: currentColor; stroke-width: 1; stroke-dasharray: 3 3; opacity: .3; }
+  .rig text { font-family: var(--mono); font-size: 11px; fill: var(--muted); }
+  .rig text.big { font-size: 12px; fill: var(--ink-2); }
+  .rig .m-rgb { fill: var(--accent); }
+  .rig .m-slam { fill: var(--c-object); }
+  .rig .a-rgb { stroke: var(--accent); stroke-width: 2; fill: none; }
+  .rig .a-slam { stroke: var(--c-object); stroke-width: 2; fill: none; }
+  .rig .h-rgb { fill: var(--accent); }
+  .rig .h-slam { fill: var(--c-object); }
+  .rig .w-rgb { fill: var(--accent); fill-opacity: .10; stroke: var(--accent); stroke-opacity: .45; stroke-width: 1; stroke-dasharray: 3 3; }
+  .rig .w-slam { fill: var(--c-object); fill-opacity: .08; stroke: var(--c-object); stroke-opacity: .40; stroke-width: 1; stroke-dasharray: 3 3; }
+  .step { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+  .dots { display: flex; gap: 5px; }
+  .dots button { width: 22px; height: 22px; padding: 0; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); font: inherit; font-size: 11.5px; font-family: var(--mono); cursor: pointer; }
+  .dots button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-2); }
+  .legend > span { display: inline-flex; align-items: center; gap: 6px; }
+  @media (max-width: 420px) { .kv { grid-template-columns: 1fr; } .kv dt { margin-top: 4px; } }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div class="page-head">
+    <p class="eyebrow">Project Aria · sensor rig</p>
+    <h1>Three cameras on one pair of glasses</h1>
+    <p class="lede">Each Aria recording carries one RGB camera and two monochrome SLAM cameras, and
+    ships its own calibration for that session. This page reads that calibration out of the payload:
+    what each camera sees, how the fisheye model is parameterised, where the cameras sit on the rig
+    and which way they point, and why every image on this site is rotated.</p>
+  </div>
+
+  <div class="row" style="margin-bottom:6px">
+    <label class="field">Recording
+      <select id="seqSel"></select>
+    </label>
+    <span class="note" id="seqNote"></span>
+  </div>
+  <p class="loading" id="status">loading calibration…</p>
+
+  <h2>The three streams</h2>
+  <p>One frame from each camera of the selected recording, in the orientation this site uses. The
+  RGB still is the video poster frame; the two SLAM stills are six frames spaced evenly through the
+  recording, stepped together so the pair is from the same instant. The media manifest lists those
+  six files but not their frame numbers, so the time under the stepper is the even spacing rather
+  than a recorded index.</p>
+  <div class="streams" id="streamGrid"></div>
+  <div class="step" id="stepBar" hidden>
+    <span class="note">SLAM still</span>
+    <div class="dots" id="dots"></div>
+    <button class="btn" type="button" id="prevBtn">‹ prev</button>
+    <button class="btn" type="button" id="nextBtn">next ›</button>
+    <span class="note" id="stepNote"></span>
+  </div>
+
+  <h2>Calibration, per camera</h2>
+  <p>The payload copies the release's <span class="mono">camera_models.json</span> verbatim. All three cameras use
+  the same fisheye model, <span class="mono">FISHEYE624</span>: one focal length, a principal point,
+  six radial terms, two tangential terms and four thin-prism terms — fifteen numbers in
+  <span class="mono">projectionParams</span>, in that order.
+  <span class="mono">maxSolidAngle</span> is the largest angle from the optical axis the model is
+  valid over, in radians; read that way it gives the cones below, a few degrees wider than the
+  110° and 150° fields of view quoted for the Aria RGB and SLAM cameras.</p>
+  <div class="cards" id="calibCards"></div>
+  <p class="note" id="calibNote"></p>
+
+  <h2>Where the cameras sit</h2>
+  <p>Extrinsics are given as <span class="mono">T_Device_Camera</span>: the pose of each camera in
+  the device frame. Translations below are in millimetres from the device origin, rotations as an
+  axis and an angle.</p>
+  <div class="table-wrap"><table id="extTable"><thead><tr>
+    <th class="no-sort">Camera</th><th class="no-sort num">t<sub>x</sub> mm</th>
+    <th class="no-sort num">t<sub>y</sub> mm</th><th class="no-sort num">t<sub>z</sub> mm</th>
+    <th class="no-sort num">|t| mm</th><th class="no-sort">Rotation axis (device)</th>
+    <th class="no-sort num">Angle</th></tr></thead><tbody></tbody></table></div>
+  <p class="note" id="extNote"></p>
+
+  <h3>Plan view of the rig</h3>
+  <figure>
+    <div class="table-wrap rig-box">
+    <svg class="rig" id="rigSvg" viewBox="-10 0 640 300" role="img"
+         aria-label="Top-down schematic of the Aria glasses showing the RGB camera and the two SLAM cameras, their headings and the baselines between them.">
+      <!-- hand-drawn glasses, seen from above; forward is up the page -->
+      <path class="frame fill" d="M52 118 Q310 84 568 118 L562 136 Q310 104 58 136 Z"/>
+      <path class="frame" d="M56 132 Q44 172 40 232"/>
+      <path class="frame" d="M564 132 Q576 172 580 232"/>
+      <path class="frame" d="M288 116 Q310 134 332 116"/>
+      <path class="dim" d="M24 88 L24 42 M18 54 L24 42 L30 54"/>
+      <text x="34" y="62">forward</text>
+      <path class="dim" d="M430 40 L600 40 M430 34 L430 46 M600 34 L600 46"/>
+      <text x="515" y="30" text-anchor="middle">5 cm</text>
+      <g id="rigDyn"></g>
+    </svg>
+    </div>
+    <figcaption id="rigCap">Schematic outline; camera positions, headings and view cones are placed
+    from the selected recording's extrinsics.</figcaption>
+  </figure>
+  <div class="legend" style="margin-top:10px">
+    <span><span class="swatch" style="background:var(--accent)"></span> RGB 214-1</span>
+    <span><span class="swatch" style="background:var(--c-object)"></span> SLAM 1201-1 / 1201-2</span>
+    <span class="note">dashed wedge = maximum valid view cone from <span class="mono">maxSolidAngle</span></span>
+  </div>
+
+  <h3>The same layout as numbers</h3>
+  <p>The device frame is awkward to read directly, so this table re-expresses the extrinsics in a rig
+  frame built from the data: the lateral axis runs from the left SLAM camera to the right one, the
+  forward axis is the RGB camera's optical axis with the lateral component removed, and up is their
+  cross product. The origin is the midpoint of the two SLAM cameras.</p>
+  <div class="table-wrap"><table id="rigTable"><thead><tr>
+    <th class="no-sort">Camera</th><th class="no-sort num">lateral cm</th><th class="no-sort num">forward cm</th>
+    <th class="no-sort num">up cm</th><th class="no-sort num">heading</th><th class="no-sort num">elevation</th>
+    <th class="no-sort num">view cone</th></tr></thead><tbody></tbody></table></div>
+  <p class="note" id="rigNote"></p>
+
+  <h2>Why every image here is rotated</h2>
+  <p>The Aria sensors are mounted on their side: a camera's image rows run roughly vertically on the
+  head, not horizontally. That is visible in the calibration itself — the angle between each camera's
+  image-up axis and the rig's up axis, computed below, is close to 90° for all three. The release's
+  own images come off the sensor in that native orientation; to look at them, each frame is turned
+  90° clockwise.</p>
+  <p>Every video, still and 2D box on this site is in that upright frame. The payload records this
+  explicitly: <span class="mono">box_frame</span> is <span class="mono" id="bfVal">"display"</span>
+  and <span class="mono">display_wh</span> gives the size of the upright frame, which is why the SLAM
+  entries are 480×640 while the sensor is 640×480. A page drawing a released box therefore only has
+  to scale it by the width it is displaying at, divided by <span class="mono">display_wh</span>.</p>
+  <div class="table-wrap"><table id="frameTable"><thead><tr>
+    <th class="no-sort">Stream</th><th class="no-sort">Payload key</th><th class="no-sort num">Sensor w×h</th>
+    <th class="no-sort num">Upright w×h</th><th class="no-sort num">Served here</th>
+    <th class="no-sort num">Box scale</th><th class="no-sort num">Image-up vs rig up</th>
+    <th class="no-sort num">vs rig lateral</th></tr></thead><tbody></tbody></table></div>
+  <p class="note" id="frameNote"></p>
+
+  <h2>Calibration is not the same twice</h2>
+  <p>Calibration ships per recording, so the numbers move a little from session to session even on
+  the same physical glasses. The table starts with the recording you have loaded and grows as you
+  switch; loading the rest is a large download, so it is opt-in.</p>
+  <div class="table-wrap"><table id="varTable"><thead><tr>
+    <th class="no-sort">Recording</th><th class="no-sort num">RGB f</th><th class="no-sort num">RGB c<sub>x</sub></th>
+    <th class="no-sort num">RGB c<sub>y</sub></th><th class="no-sort num">SLAM-L f</th><th class="no-sort num">SLAM-R f</th>
+    <th class="no-sort num">L↔R cm</th><th class="no-sort num">RGB↔L cm</th><th class="no-sort">Glasses</th>
+  </tr></thead><tbody></tbody></table></div>
+  <div class="row" style="margin-top:12px">
+    <button class="btn" type="button" id="loadAll">Load the remaining payloads</button>
+    <span class="note" id="varNote"></span>
+  </div>
+  <p class="note">Focal lengths and principal points are in pixels of the native sensor frame;
+  baselines are 3D distances between camera origins.</p>
+</main>
+
+<script>
+HOT3D.init();
+(() => {
+  /* the twelve Aria recordings that ship a full payload with this site */
+  const FEATURED = ['P0001_4bf4e21a','P0002_65085bfc','P0003_ebdc6ff7','P0009_e71e2f24',
+    'P0010_573b2de6','P0010_8ff3e5c4','P0011_2255f410','P0011_72efb935','P0012_130a66e1',
+    'P0014_1fdca00e','P0015_cc5dfd13','P0015_e7458eb3'];
+  const ORDER = ['camera-rgb', 'camera-slam-left', 'camera-slam-right'];
+  const NICE = { 'camera-rgb': 'RGB', 'camera-slam-left': 'SLAM left', 'camera-slam-right': 'SLAM right' };
+  const SHORT = { 'camera-rgb': 'RGB', 'camera-slam-left': 'SLAM-L', 'camera-slam-right': 'SLAM-R' };
+  const PARAM_NAMES = ['f','cx','cy','k1','k2','k3','k4','k5','k6','p1','p2','s1','s2','s3','s4'];
+
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const D = 180 / Math.PI;
+
+  /* ---------- small vector helpers (metres, device frame) ---------- */
+  const sub = (a,b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+  const dot = (a,b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+  const cross = (a,b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+  const norm = (a) => { const n = Math.hypot(a[0],a[1],a[2]); return [a[0]/n, a[1]/n, a[2]/n]; };
+  const len = (a) => Math.hypot(a[0],a[1],a[2]);
+  /** column c of the flat row-major 3x3 from HOT3D.quatToMat3 */
+  const col = (m,c) => [m[c], m[3+c], m[6+c]];
+  const ang = (a,b) => Math.acos(Math.max(-1, Math.min(1, dot(a,b)))) * D;
+
+  const num3 = (v) => v.toFixed(3);
+  /** fixed-point without a "-0.00": several rig-frame cells are zero by construction */
+  const fx = (v, d) => { const s = v.toFixed(d); return /^-0(\.0+)?$/.test(s) ? s.slice(1) : s; };
+  /** signed degrees, same treatment */
+  const sdeg = (v, d = 1) => { const s = fx(v, d); return (Number(s) > 0 ? '+' : '') + s + '°'; };
+  const coef = (v) => (Math.abs(v) >= 1e-3 ? v.toFixed(6) : v.toExponential(2));
+
+  function axisAngle(q) {
+    const w = Math.max(-1, Math.min(1, q[0]));
+    const a = 2 * Math.acos(w), s = Math.sqrt(Math.max(0, 1 - w*w));
+    const ax = s > 1e-9 ? [q[1]/s, q[2]/s, q[3]/s] : [1, 0, 0];
+    return { axis: ax, deg: a * D };
+  }
+
+  /** rig frame from the extrinsics themselves: lateral / forward / up, origin between the SLAM cameras */
+  function rigFrame(by) {
+    const tl = by['camera-slam-left'].T_Device_Camera.translation_xyz;
+    const tr = by['camera-slam-right'].T_Device_Camera.translation_xyz;
+    const u = norm(sub(tr, tl));
+    const fr = col(HOT3D.quatToMat3(by['camera-rgb'].T_Device_Camera.quaternion_wxyz), 2);
+    const f = norm(sub(fr, [u[0]*dot(fr,u), u[1]*dot(fr,u), u[2]*dot(fr,u)]));
+    return { u, f, up: cross(u, f), o: [(tl[0]+tr[0])/2, (tl[1]+tr[1])/2, (tl[2]+tr[2])/2] };
+  }
+
+  /** per-camera geometry in the rig frame */
+  function rigGeom(cam, R) {
+    const T = cam.T_Device_Camera;
+    const d = sub(T.translation_xyz, R.o);
+    const M = HOT3D.quatToMat3(T.quaternion_wxyz);
+    const axis = col(M, 2), imgUp = col(M, 1).map(v => -v);
+    return {
+      lat: dot(d, R.u), fwd: dot(d, R.f), up: dot(d, R.up),
+      yaw: Math.atan2(dot(axis, R.u), dot(axis, R.f)) * D,
+      pitch: Math.asin(Math.max(-1, Math.min(1, dot(axis, R.up)))) * D,
+      upVsUp: ang(imgUp, R.up), upVsLat: ang(imgUp, R.u),
+    };
+  }
+
+  /* ---------- state ---------- */
+  const seen = new Map();          // seq -> cameras[] of every payload loaded so far
+  let cur = null, media = null, step = 0;
+  let token = 0;                   // bumped per load; anything older must not write to the page
+
+  /* ---------- streams ---------- */
+  function renderStreams(seq, s, m, my) {
+    const grid = $('streamGrid');
+    grid.textContent = '';
+    const by = Object.fromEntries(s.cameras.map(c => [c.label, c]));
+    for (const lab of ORDER) {
+      const cam = by[lab];
+      const key = s.streams[cam.stream_id];
+      const isRgb = key === 'rgb';
+      const wrap = document.createElement('figure');
+      const st = !isRgb && m.slam ? m.slam[cam.stream_id] : null;
+      const src = isRgb ? m.poster : (st && st.stills ? st.stills[0] : null);
+      const dw = s.display_wh[key];
+      const extra = isRgb
+        ? `poster frame of <span class="mono">${esc(m.video)}</span>, ${m.size_px}×${m.size_px} at ${m.fps} fps`
+        : (st ? `${st.stills.length} stills out of ${HOT3D.fmt.n(st.count)} frames` : 'no stills released');
+      wrap.innerHTML =
+        `<div class="shot">${src
+          ? `<img id="img_${key}" src="media/${esc(src)}" alt="${esc(NICE[lab])} frame from ${esc(seq)}" width="${dw[0]}" height="${dw[1]}">`
+          : `<div class="ph">no still released</div>`}</div>
+         <figcaption><strong>${esc(NICE[lab])}</strong> · <span class="mono">${esc(cam.stream_id)}</span><br>
+         <span class="mono">${cam.imageWidth}×${cam.imageHeight}</span> sensor,
+         upright <span class="mono">${dw[0]}×${dw[1]}</span><span id="nat_${key}"></span><br>
+         ${extra}</figcaption>`;
+      grid.append(wrap);
+      const img = wrap.querySelector('img');
+      if (img) {
+        const shown = () => {
+          if (my !== token) return;   // a previous recording's image finishing after the switch
+          const el = $('nat_' + key);
+          if (el) el.innerHTML = `, file <span class="mono">${img.naturalWidth}×${img.naturalHeight}</span>`;
+          renderFrames(cur);
+        };
+        if (img.complete && img.naturalWidth) shown();
+        else img.addEventListener('load', shown, { once: true });
+      }
+    }
+    const bar = $('stepBar');
+    const dots = $('dots');
+    const n = (m.slam && m.slam['1201-1'] && m.slam['1201-1'].stills) ? m.slam['1201-1'].stills.length : 0;
+    bar.hidden = n === 0;
+    dots.textContent = '';
+    for (let k = 0; k < n; k++) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = String(k + 1);
+      b.setAttribute('aria-pressed', String(k === step));
+      b.addEventListener('click', () => setStep(k));
+      dots.append(b);
+    }
+    // keep stepping instant: the stills are a few tens of kB each
+    for (const sid of ['1201-1', '1201-2']) {
+      const list = m.slam && m.slam[sid] ? m.slam[sid].stills : [];
+      for (const f of list) { const im = new Image(); im.src = 'media/' + f; }
+    }
+    setStep(Math.min(step, Math.max(n - 1, 0)));
+  }
+
+  function setStep(k) {
+    if (!media || !media.slam) return;
+    const list = media.slam['1201-1'] ? media.slam['1201-1'].stills : [];
+    const n = list.length;
+    if (!n) return;
+    step = ((k % n) + n) % n;
+    for (const [sid, key] of [['1201-1', 'slam_left'], ['1201-2', 'slam_right']]) {
+      const img = $('img_' + key), st = media.slam[sid];
+      if (img && st) img.src = 'media/' + st.stills[step];
+    }
+    [...$('dots').children].forEach((b, i) => b.setAttribute('aria-pressed', String(i === step)));
+    const frac = n > 1 ? step / (n - 1) : 0;
+    $('stepNote').textContent =
+      `${step + 1} of ${n} · about ${HOT3D.fmt.clock(frac * cur.duration_s)} into the ${HOT3D.fmt.clock(cur.duration_s)} recording`;
+  }
+
+  /* ---------- calibration ---------- */
+  function renderCalib(s) {
+    const box = $('calibCards');
+    box.textContent = '';
+    const by = Object.fromEntries(s.cameras.map(c => [c.label, c]));
+    for (const lab of ORDER) {
+      const c = by[lab], p = c.projectionParams, key = s.streams[c.stream_id];
+      const model = String(c.projectionModelType).replace('CameraModelType.', '');
+      const theta = c.maxSolidAngle;                       // half-angle, radians
+      const rValid = p[0] * theta;                         // equidistant radius at that angle, px
+      /* measured from the principal point, not the image centre: the two differ by a pixel or two */
+      const toEdge = Math.min(p[1], c.imageWidth - p[1], p[2], c.imageHeight - p[2]);
+      const toCorner = Math.hypot(Math.max(p[1], c.imageWidth - p[1]), Math.max(p[2], c.imageHeight - p[2]));
+      const verdict = rValid < toEdge ? 'inside the frame'
+        : rValid < toCorner ? 'past the edges, short of the corners' : 'past the corners';
+      const grp = (label, idx) =>
+        `<div class="grp"><span class="gl">${label}</span><span class="gv">${
+          idx.map(i => `<code>${PARAM_NAMES[i]} ${coef(p[i])}</code>`).join('')}</span></div>`;
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML =
+        `<h3>${esc(NICE[lab])}</h3>
+         <dl class="kv">
+           <dt>stream id</dt><dd>${esc(c.stream_id)} · ${esc(key)}</dd>
+           <dt>resolution</dt><dd>${c.imageWidth}×${c.imageHeight}</dd>
+           <dt>model</dt><dd>${esc(model)}</dd>
+           <dt>focal length</dt><dd>${num3(p[0])} px</dd>
+           <dt>principal pt</dt><dd>${num3(p[1])}, ${num3(p[2])} px</dd>
+           <dt>max solid angle</dt><dd>${theta.toFixed(1)} rad → ${(theta * D).toFixed(1)}° half, ${(2 * theta * D).toFixed(0)}° cone</dd>
+           <dt>valid radius</dt><dd>${rValid.toFixed(0)} px · edge ${toEdge.toFixed(0)} · corner ${toCorner.toFixed(0)} → ${verdict}</dd>
+           <dt>serial</dt><dd style="font-size:11px">${esc(c.serialNumber)}</dd>
+         </dl>
+         <div class="coefs">
+           ${grp('radial', [3,4,5,6,7,8])}
+           ${grp('tangential', [9,10])}
+           ${grp('thin prism', [11,12,13,14])}
+         </div>`;
+      box.append(card);
+    }
+    $('calibNote').textContent =
+      'The valid radius is the focal length times the maximum angle, i.e. where the equidistant part of ' +
+      'the fisheye model puts that ray; the distortion terms move it somewhat, so read it as an ' +
+      'approximation. Edge and corner are the distances from that camera’s principal point to the ' +
+      'nearest image edge and to the farthest corner, so the comparison says how much of the frame the ' +
+      'model is declared valid over.';
+  }
+
+  /* ---------- extrinsics, rig table, diagram ---------- */
+  function renderExtrinsics(s) {
+    const by = Object.fromEntries(s.cameras.map(c => [c.label, c]));
+    const R = rigFrame(by);
+    const tb = $('extTable').querySelector('tbody');
+    tb.textContent = '';
+    let origin = null;                 // the camera the device frame is pinned to: smallest |t|
+    for (const lab of ORDER) {
+      const T = by[lab].T_Device_Camera, t = T.translation_xyz, aa = axisAngle(T.quaternion_wxyz);
+      if (origin === null || len(t) * 1000 < origin.mm) origin = { lab, mm: len(t) * 1000, deg: aa.deg };
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        `<td>${esc(NICE[lab])}</td>
+         <td class="num">${(t[0]*1000).toFixed(2)}</td>
+         <td class="num">${(t[1]*1000).toFixed(2)}</td>
+         <td class="num">${(t[2]*1000).toFixed(2)}</td>
+         <td class="num">${(len(t)*1000).toFixed(2)}</td>
+         <td class="mono">(${aa.axis.map(v => v.toFixed(3)).join(', ')})</td>
+         <td class="num">${aa.deg.toFixed(2)}°</td>`;
+      tb.append(tr);
+    }
+    $('extNote').textContent =
+      `One row is almost all zeros: the device frame is pinned to the ${NICE[origin.lab]} camera, whose ` +
+      `translation is ${origin.mm.toFixed(2)} mm and whose rotation is ${origin.deg.toFixed(2)}°. ` +
+      `A rotation that small has an ill-conditioned axis, so read that row's axis as arbitrary rather ` +
+      `than meaningful; the other two rows are the real rig geometry.`;
+
+    const rb = $('rigTable').querySelector('tbody');
+    rb.textContent = '';
+    for (const lab of ORDER) {
+      const g = rigGeom(by[lab], R);
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        `<td>${esc(NICE[lab])}</td>
+         <td class="num">${fx(g.lat*100, 2)}</td>
+         <td class="num">${fx(g.fwd*100, 2)}</td>
+         <td class="num">${fx(g.up*100, 2)}</td>
+         <td class="num">${sdeg(g.yaw)}</td>
+         <td class="num">${sdeg(g.pitch)}</td>
+         <td class="num">${(2 * by[lab].maxSolidAngle * D).toFixed(0)}°</td>`;
+      rb.append(tr);
+    }
+    const gl = rigGeom(by['camera-slam-left'], R), gr = rigGeom(by['camera-slam-right'], R);
+    const grgb = rigGeom(by['camera-rgb'], R);
+    const el = (gl.pitch + gr.pitch) / 2;
+    $('rigNote').textContent =
+      `Heading turns about the up axis, positive toward the wearer's right; elevation is measured off ` +
+      `the lateral/forward plane. Forward is the RGB axis with its lateral component taken out, so the ` +
+      `RGB camera's elevation is zero by construction — but its heading is not: the ` +
+      `${Math.abs(grgb.yaw).toFixed(1)}° in that row is exactly the component orthogonalisation removed, ` +
+      `the amount the RGB camera is turned off the SLAM pair's perpendicular. The two SLAM cameras splay ` +
+      `outward by ${Math.abs(gl.yaw).toFixed(1)}° and ${Math.abs(gr.yaw).toFixed(1)}° and sit ` +
+      `${Math.abs(el).toFixed(1)}° ${el >= 0 ? 'above' : 'below'} the RGB axis in elevation.`;
+
+    drawRig(by, R);
+    renderFrames(s);
+  }
+
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  function sv(tag, attrs, text) {
+    const e = document.createElementNS(SVGNS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function drawRig(by, R) {
+    const g = $('rigDyn');
+    g.textContent = '';
+    const S = 34, CX = 310, CY = 127;                 // px per cm, and the SLAM baseline row
+    const P = {};
+    for (const lab of ORDER) {
+      const q = rigGeom(by[lab], R);
+      P[lab] = { x: CX + q.lat * 100 * S, y: CY - q.fwd * 100 * S, yaw: q.yaw / D,
+                 cone: by[lab].maxSolidAngle, rgb: lab === 'camera-rgb' };
+    }
+    // view cones first, so the markers and arrows sit on top
+    for (const lab of ORDER) {
+      const p = P[lab], r = p.rgb ? 96 : 76, k = p.rgb ? 'rgb' : 'slam';
+      const a0 = p.yaw - p.cone, a1 = p.yaw + p.cone;
+      const pt = (a) => `${(p.x + r * Math.sin(a)).toFixed(1)} ${(p.y - r * Math.cos(a)).toFixed(1)}`;
+      const large = (a1 - a0) > Math.PI ? 1 : 0;
+      g.append(sv('path', { class: 'w-' + k, d: `M${p.x.toFixed(1)} ${p.y.toFixed(1)} L${pt(a0)} A${r} ${r} 0 ${large} 1 ${pt(a1)} Z` }));
+    }
+    for (const lab of ORDER) {
+      const p = P[lab], k = p.rgb ? 'rgb' : 'slam';
+      const dx = Math.sin(p.yaw), dy = -Math.cos(p.yaw);
+      const L = 46, hx = p.x + dx * L, hy = p.y + dy * L;
+      g.append(sv('path', { class: 'a-' + k, d: `M${p.x.toFixed(1)} ${p.y.toFixed(1)} L${(p.x + dx*(L-8)).toFixed(1)} ${(p.y + dy*(L-8)).toFixed(1)}` }));
+      g.append(sv('path', { class: 'h-' + k, d:
+        `M${hx.toFixed(1)} ${hy.toFixed(1)} L${(hx - dx*10 - dy*4.5).toFixed(1)} ${(hy - dy*10 + dx*4.5).toFixed(1)} ` +
+        `L${(hx - dx*10 + dy*4.5).toFixed(1)} ${(hy - dy*10 - dx*4.5).toFixed(1)} Z` }));
+      g.append(sv('circle', { class: 'm-' + k, cx: p.x.toFixed(1), cy: p.y.toFixed(1), r: 5.5 }));
+    }
+    // name / heading labels below the rim, with leaders
+    const labelAt = [
+      ['camera-slam-left', 48, 176, 'start'],
+      ['camera-rgb', 168, 208, 'start'],
+      ['camera-slam-right', 556, 176, 'end'],
+    ];
+    for (const [lab, lx, ly, anchor] of labelAt) {
+      const p = P[lab], q = rigGeom(by[lab], R);
+      g.append(sv('path', { class: 'lead', d: `M${p.x.toFixed(1)} ${(p.y + 7).toFixed(1)} L${lx} ${ly - 12}` }));
+      g.append(sv('text', { class: 'big', x: lx, y: ly, 'text-anchor': anchor },
+        `${SHORT[lab]} ${by[lab].stream_id}`));
+      g.append(sv('text', { x: lx, y: ly + 14, 'text-anchor': anchor },
+        `${sdeg(q.yaw)} heading`));
+    }
+    // baselines
+    const t = (lab) => by[lab].T_Device_Camera.translation_xyz;
+    const bl = (a, b) => len(sub(t(a), t(b))) * 100;
+    const dim = (x0, x1, y, label) => {
+      g.append(sv('path', { class: 'dim', d: `M${x0.toFixed(1)} ${y} L${x1.toFixed(1)} ${y} M${x0.toFixed(1)} ${y-5} L${x0.toFixed(1)} ${y+5} M${x1.toFixed(1)} ${y-5} L${x1.toFixed(1)} ${y+5}` }));
+      g.append(sv('text', { x: ((x0 + x1) / 2).toFixed(1), y: y - 8, 'text-anchor': 'middle' }, label));
+    };
+    for (const lab of ORDER) {
+      const p = P[lab];
+      g.append(sv('path', { class: 'lead', d: `M${p.x.toFixed(1)} ${(p.y + 8).toFixed(1)} L${p.x.toFixed(1)} 246` }));
+    }
+    dim(P['camera-slam-left'].x, P['camera-slam-right'].x, 252, `SLAM-L ↔ SLAM-R  ${bl('camera-slam-left','camera-slam-right').toFixed(2)} cm`);
+    dim(P['camera-rgb'].x, P['camera-slam-right'].x, 282, `RGB ↔ SLAM-R  ${bl('camera-rgb','camera-slam-right').toFixed(2)} cm`);
+    const mid = (P['camera-rgb'].x + P['camera-slam-left'].x) / 2;
+    g.append(sv('path', { class: 'dim', d: `M${mid.toFixed(1)} ${(P['camera-rgb'].y - 12).toFixed(1)} L190 58` }));
+    g.append(sv('text', { x: 196, y: 54 }, `RGB ↔ SLAM-L  ${bl('camera-rgb','camera-slam-left').toFixed(2)} cm`));
+    const q = rigGeom(by['camera-rgb'], R);
+    $('rigCap').innerHTML =
+      `Seen from above, forward up the page, drawn to the 5 cm scale bar: camera positions, headings and ` +
+      `maximum view cones are computed from <span class="mono">${esc(cur.seq)}</span>'s ` +
+      `<span class="mono">T_Device_Camera</span>. The dimensions are true 3D distances but the bars are ` +
+      `drawn between the markers' lateral positions, so the two RGB bars come out shorter than their ` +
+      `labels: the RGB camera also sits ${fx(q.up * 100, 2)} cm above the SLAM baseline, which a plan ` +
+      `view cannot show.`;
+  }
+
+  /* ---------- rotation convention ---------- */
+  function renderFrames(s) {
+    if (!s) return;
+    const by = Object.fromEntries(s.cameras.map(c => [c.label, c]));
+    const R = rigFrame(by);
+    const tb = $('frameTable').querySelector('tbody');
+    tb.textContent = '';
+    for (const lab of ORDER) {
+      const c = by[lab], key = s.streams[c.stream_id], dw = s.display_wh[key], g = rigGeom(c, R);
+      const img = $('img_' + key);
+      const servedW = img && img.naturalWidth ? img.naturalWidth : null;
+      const servedH = img && img.naturalHeight ? img.naturalHeight : null;
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        `<td>${esc(NICE[lab])} <span class="mono">${esc(c.stream_id)}</span></td>
+         <td class="mono">${esc(key)}</td>
+         <td class="num">${c.imageWidth}×${c.imageHeight}</td>
+         <td class="num">${dw[0]}×${dw[1]}</td>
+         <td class="num">${servedW ? servedW + '×' + servedH : '—'}</td>
+         <td class="num">${servedW ? (servedW / dw[0]).toFixed(3) : '—'}</td>
+         <td class="num">${g.upVsUp.toFixed(1)}°</td>
+         <td class="num">${g.upVsLat.toFixed(1)}°</td>`;
+      tb.append(tr);
+    }
+    $('bfVal').textContent = JSON.stringify(s.box_frame);
+    $('frameNote').textContent =
+      'Served here is the size of the file this page actually decoded — the poster frame for RGB, which ' +
+      'matches the mp4, and the JPEG stills for the SLAM cameras. Box scale is that width divided by display_wh, the ' +
+      'only factor a page needs to draw a released box. The last two columns are angles between each ' +
+      "camera's image-up axis and the rig's up and lateral axes: near 90° and near the camera's own " +
+      'heading, which is what a sideways-mounted sensor looks like in the extrinsics.';
+  }
+
+  /* ---------- calibration spread across recordings ---------- */
+  const fileBytes = new Map();
+  /** real size of the payloads not yet loaded, from Content-Length; null if the host will not say */
+  async function sizeOfRemaining() {
+    const left = FEATURED.filter(s => !seen.has(s));
+    try {
+      await Promise.all(left.filter(s => !fileBytes.has(s)).map(async (s) => {
+        const r = await fetch(`data/seq/${s}.json`, { method: 'HEAD' });
+        const n = Number(r.headers.get('content-length'));
+        if (r.ok && isFinite(n) && n > 0) fileBytes.set(s, n);
+      }));
+    } catch (e) { /* file:// and some hosts do not answer HEAD; the label then omits the size */ }
+    if (!left.length || !left.every(s => fileBytes.has(s))) return null;
+    return left.reduce((a, s) => a + fileBytes.get(s), 0);
+  }
+
+  function renderVar() {
+    const tb = $('varTable').querySelector('tbody');
+    tb.textContent = '';
+    const rows = [...seen.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([seq, cams]) => {
+      const by = Object.fromEntries(cams.map(c => [c.label, c]));
+      const t = (l) => by[l].T_Device_Camera.translation_xyz;
+      return {
+        seq,
+        f: by['camera-rgb'].projectionParams[0],
+        cx: by['camera-rgb'].projectionParams[1],
+        cy: by['camera-rgb'].projectionParams[2],
+        fl: by['camera-slam-left'].projectionParams[0],
+        fr: by['camera-slam-right'].projectionParams[0],
+        blr: len(sub(t('camera-slam-left'), t('camera-slam-right'))) * 100,
+        brl: len(sub(t('camera-rgb'), t('camera-slam-left'))) * 100,
+        ser: by['camera-rgb'].serialNumber,
+      };
+    });
+    const sers = [...new Set(rows.map(r => r.ser))].sort();
+    for (const r of rows) {
+      const tr = document.createElement('tr');
+      if (r.seq === cur.seq) tr.style.fontWeight = '500';
+      tr.innerHTML =
+        `<td class="mono">${esc(HOT3D.fmt.seq(r.seq))}</td>
+         <td class="num">${r.f.toFixed(3)}</td><td class="num">${r.cx.toFixed(3)}</td>
+         <td class="num">${r.cy.toFixed(3)}</td><td class="num">${r.fl.toFixed(3)}</td>
+         <td class="num">${r.fr.toFixed(3)}</td><td class="num">${r.blr.toFixed(3)}</td>
+         <td class="num">${r.brl.toFixed(3)}</td>
+         <td class="mono">device ${sers.indexOf(r.ser) + 1}</td>`;
+      tb.append(tr);
+    }
+    if (rows.length > 1) {
+      const sp = (k, d) => {
+        const v = rows.map(r => r[k]);
+        return `<td class="num">${(Math.max(...v) - Math.min(...v)).toFixed(d)}</td>`;
+      };
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td><strong>spread</strong> (max−min)</td>${sp('f',3)}${sp('cx',3)}${sp('cy',3)}` +
+        `${sp('fl',3)}${sp('fr',3)}${sp('blr',3)}${sp('brl',3)}<td class="mono">${sers.length} serial${sers.length === 1 ? '' : 's'}</td>`;
+      tr.style.background = 'var(--surface-2)';
+      tb.append(tr);
+    }
+    const left = FEATURED.filter(s => !seen.has(s));
+    const btn = $('loadAll');
+    btn.hidden = left.length === 0;
+    const label = `Load the remaining ${left.length} payload${left.length === 1 ? '' : 's'}`;
+    btn.textContent = label;
+    sizeOfRemaining().then(b => {
+      if (b && !btn.disabled && btn.textContent === label) btn.textContent = `${label} (${(b / 1048576).toFixed(0)} MB)`;
+    });
+    const byS = new Map();
+    for (const r of rows) { if (!byS.has(r.ser)) byS.set(r.ser, []); byS.get(r.ser).push(r.f); }
+    const repeats = [...byS.values()].filter(v => v.length > 1);
+    const within = repeats.length ? Math.max(...repeats.map(v => Math.max(...v) - Math.min(...v))) : null;
+    const devLine = sers.length === 1
+      ? 'so far every row is the same physical pair'
+      : `${sers.length} different physical pairs appear here`;
+    $('varNote').textContent = rows.length < 2
+      ? 'One recording loaded. Switch recordings above, or load the rest, to see the spread.'
+      : `${rows.length} of ${FEATURED.length} featured recordings loaded. Glasses groups them by RGB ` +
+        `serial number — ${devLine}.` +
+        (within !== null ? ` Between recordings made on one pair, the RGB focal length still moves by up to ${within.toFixed(3)} px.` : '');
+  }
+
+  /* ---------- load ---------- */
+  async function load(seq) {
+    const my = ++token;
+    $('status').hidden = false;
+    $('status').textContent = `loading ${seq} …`;
+    try {
+      const [s, m] = await Promise.all([HOT3D.sequence(seq), HOT3D.json(`media/${seq}_media.json`)]);
+      if (my !== token) return;        // a newer selection won while this one was in flight
+      cur = s; media = m;
+      seen.set(seq, s.cameras);
+      $('seqNote').textContent =
+        `${s.participant} · ${HOT3D.fmt.n(s.F)} frames · ${HOT3D.fmt.clock(s.duration_s)} · ${s.fps} fps · ${s.cameras.length} cameras`;
+      renderStreams(seq, s, m, my);
+      renderCalib(s);
+      renderExtrinsics(s);
+      renderVar();
+      $('status').hidden = true;
+    } catch (e) {
+      if (my !== token) return;
+      $('status').hidden = false;
+      $('status').textContent =
+        `Could not load ${seq}: ${e.message}. The payload and its media manifest live in data/seq/ and media/.` +
+        (cur ? ` Everything below is still ${cur.seq}.` : '');
+    }
+  }
+
+  async function loadAll() {
+    const btn = $('loadAll');
+    btn.disabled = true;
+    const left = FEATURED.filter(s => !seen.has(s));
+    for (let i = 0; i < left.length; i++) {
+      btn.textContent = `loading ${i + 1} of ${left.length} …`;
+      try {
+        const s = await HOT3D.sequence(left[i]);
+        seen.set(left[i], s.cameras);
+        renderVar();
+      } catch (e) {
+        $('varNote').textContent = `Stopped at ${left[i]}: ${e.message}`;
+        break;
+      }
+    }
+    btn.disabled = false;
+    renderVar();
+  }
+
+  const sel = $('seqSel');
+  for (const s of FEATURED) {
+    const o = document.createElement('option');
+    o.value = s; o.textContent = HOT3D.fmt.seq(s);
+    sel.append(o);
+  }
+  sel.value = 'P0003_ebdc6ff7';
+  sel.addEventListener('change', () => load(sel.value));
+  $('prevBtn').addEventListener('click', () => setStep(step - 1));
+  $('nextBtn').addEventListener('click', () => setStep(step + 1));
+  $('loadAll').addEventListener('click', loadAll);
+  load(sel.value);
+})();
+</script>
+</body>
+</html>

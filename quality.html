@@ -1,0 +1,842 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Annotation quality · HOT3D Aria</title>
+<meta name="description" content="The HOT3D per-frame annotation masks for the Aria recordings: what each mask asserts, where in a recording it fails, how the twelve featured recordings compare, and how much of the release passes QA.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+<style>
+  .q-split { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 320px; align-items: start; }
+  @media (max-width: 880px) { .q-split { grid-template-columns: minmax(0, 1fr); } }
+  .controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 12px; }
+  canvas.strip { width: 100%; height: 216px; }
+  canvas.hist { width: 100%; height: 232px; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+  .legend .key { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 11px; height: 11px; border-radius: 3px; display: inline-block; border: 1px solid var(--line); }
+  .readout { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 12.5px;
+             color: var(--ink-2); min-height: 2.8em; margin-top: 8px; }
+  .sidetab td, .sidetab th { padding: 6px 9px; }
+  .sidetab { font-size: 12.5px; }
+  td.heat { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 500; }
+  th.rot { font-size: 11px; letter-spacing: .02em; }
+  ul.worst { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 4px;
+             grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); font-size: 13px; }
+  ul.worst code { font-family: var(--mono); font-size: 12.5px; }
+  .defs td:first-child { font-family: var(--mono); font-size: 12.5px; }
+  .defs td:nth-child(2) { white-space: normal; min-width: 260px; }
+  .defs td:nth-child(3) { white-space: normal; }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div class="page-head">
+    <p class="eyebrow">Annotation quality</p>
+    <h1>The masks, not the frame count, decide how much of a recording is usable</h1>
+    <p class="lede">Every Aria frame carries seven boolean masks per camera stream: the release's own
+    statement about what it will vouch for at that instant. Two recordings of the same length can differ
+    by an order of magnitude in how many frames actually carry a pose. This page reads the masks as they
+    ship, marks where in a recording they fail, and shows how uneven they are across the release.</p>
+  </div>
+
+  <section class="figs" id="figs" aria-label="Annotation quality at a glance">
+    <div class="fig"><div class="n" id="fAria">—</div><div class="k">Aria recordings</div></div>
+    <div class="fig"><div class="n" id="fQa">—</div><div class="k">report a QA pass rate</div></div>
+    <div class="fig"><div class="n" id="fNoGt">—</div><div class="k">hold back ground truth</div></div>
+    <div class="fig"><div class="n" id="fMedian">—</div><div class="k">median qa_pass_rgb</div></div>
+    <div class="fig"><div class="n" id="fBelow">—</div><div class="k">below 90% qa_pass_rgb</div></div>
+    <div class="fig"><div class="n" id="fWeighted">—</div><div class="k">of annotated RGB frames pass QA</div></div>
+  </section>
+  <p class="note" id="figsNote">Reading data/index.json…</p>
+
+  <h2>What each mask asserts</h2>
+  <p>The masks live in <code>masks.&lt;name&gt;.&lt;stream&gt;</code> of each sequence payload, one byte
+  per frame per stream: <strong>1</strong> the assertion holds, <strong>0</strong> it does not,
+  <strong>255</strong> the frame was not annotated on that stream at all. Pass rates on this page are
+  computed over annotated frames only, so a 255 never counts as a pass or as a failure. What a 0 means
+  in the world — an occluded hand, a dropped mocap marker, a blown-out exposure — is not recorded; only
+  the verdict is.</p>
+
+  <div class="table-wrap">
+    <table class="defs">
+      <thead><tr>
+        <th class="no-sort">mask</th>
+        <th class="no-sort">1 means</th>
+        <th class="no-sort">across the three streams, in the 12 featured recordings</th>
+      </tr></thead>
+      <tbody id="defsBody"></tbody>
+    </table>
+  </div>
+  <p class="note">The last column is computed from the twelve payloads: for every frame annotated on all
+  three streams, whether <code>rgb</code>, <code>slam_left</code> and <code>slam_right</code> carry the
+  same value. The three pose masks are properties of the timestamp, not of a camera; the exposure and
+  visibility masks are properties of one image and differ between streams.</p>
+
+  <h2>One recording, frame by frame</h2>
+  <p>Each row below is one mask over the whole recording, left to right in time. Green is a pass, red a
+  failure, grey a frame that was not annotated on this stream. A pixel column covers several frames: it
+  is drawn red whenever any frame inside it fails, at full strength when most of them do, so an isolated
+  one-frame dropout stays visible.</p>
+
+  <div class="controls">
+    <label class="field">recording
+      <select id="selSeq"></select>
+    </label>
+    <label class="field">stream
+      <select id="selStream">
+        <option value="rgb">rgb — 1408×1408</option>
+        <option value="slam_left">slam_left — 640×480</option>
+        <option value="slam_right">slam_right — 640×480</option>
+      </select>
+    </label>
+    <span class="pill" id="seqMeta">—</span>
+  </div>
+
+  <div class="q-split">
+    <figure class="card">
+      <canvas class="strip" id="strip" aria-label="Per-frame mask states for the selected recording"></canvas>
+      <div class="legend">
+        <span class="key"><i class="sw" id="swOk"></i>pass (1)</span>
+        <span class="key"><i class="sw" id="swBad"></i>fail (0)</span>
+        <span class="key"><i class="sw" id="swNa"></i>not annotated (255)</span>
+      </div>
+      <div class="readout" id="readout">Loading payload…</div>
+    </figure>
+    <div class="card">
+      <h3 style="margin-bottom:8px">Pass rate on this stream</h3>
+      <table class="sidetab">
+        <thead><tr>
+          <th class="no-sort">mask</th><th class="no-sort num">pass</th>
+          <th class="no-sort num">fail</th><th class="no-sort num">worst run</th>
+        </tr></thead>
+        <tbody id="rateBody"><tr><td colspan="4" class="loading">reading…</td></tr></tbody>
+      </table>
+      <p class="note" id="naNote" style="margin-bottom:0"></p>
+    </div>
+  </div>
+  <p class="note" id="qaRel"></p>
+
+  <h2>The twelve featured recordings compared</h2>
+  <p>Pass rate per mask on the stream selected above, worst first. Click a column to sort by it. Cells
+  are tinted by how much of the recording the mask rejects. The masks exist only inside the sequence
+  payloads, so this table is filled in as all twelve are read.</p>
+  <p class="loading" id="sweepNote">Reading the twelve sequence payloads…</p>
+  <div class="table-wrap">
+    <table id="heatTable">
+      <thead><tr id="heatHead"></tr></thead>
+      <tbody id="heatBody"></tbody>
+    </table>
+  </div>
+  <ul class="worst" id="worstList"></ul>
+
+  <h2>The whole Aria release</h2>
+  <p><code>index.json</code> carries one number per recording, <code>qa_pass_rgb</code>: the fraction of
+  RGB frames whose <code>qa_pass</code> mask is 1. It is the only quality figure available for the
+  recordings that have no payload on this site, and its distribution is long-tailed — most recordings are
+  nearly clean, and a small group is badly compromised.</p>
+
+  <div class="q-split">
+    <figure class="card">
+      <canvas class="hist" id="hist" aria-label="Histogram of qa_pass_rgb over the Aria recordings that report it"></canvas>
+      <figcaption id="histCap">Loading…</figcaption>
+    </figure>
+    <div class="card">
+      <h3 style="margin-bottom:8px">Reading the tail</h3>
+      <div id="tailFacts" class="loading">reading…</div>
+    </div>
+  </div>
+
+  <p id="closing"></p>
+  <p id="closingEx" class="note"></p>
+</main>
+
+<script>
+HOT3D.init();
+
+/* The twelve recordings that ship a full payload in data/seq/. */
+const FEATURED = [
+  'P0001_4bf4e21a', 'P0002_65085bfc', 'P0003_ebdc6ff7', 'P0009_e71e2f24',
+  'P0010_573b2de6', 'P0010_8ff3e5c4', 'P0011_2255f410', 'P0011_72efb935',
+  'P0012_130a66e1', 'P0014_1fdca00e', 'P0015_cc5dfd13', 'P0015_e7458eb3',
+];
+const STREAMS = ['rgb', 'slam_left', 'slam_right'];
+const MASKS = [
+  { k: 'qa_pass', s: 'qa_pass',
+    d: 'the release accepts this frame on this stream — the flag that decides whether a frame is used at all.' },
+  { k: 'good_exposure', s: 'exposure',
+    d: 'this stream’s image is exposed well enough to be read.' },
+  { k: 'hand_visible', s: 'hand vis',
+    d: 'an annotated hand appears in this stream’s image.' },
+  { k: 'object_visible', s: 'obj vis',
+    d: 'an annotated object appears in this stream’s image.' },
+  { k: 'hand_pose_available', s: 'hand pose',
+    d: 'hand pose ground truth exists at this frame’s timestamp.' },
+  { k: 'headset_pose_available', s: 'head pose',
+    d: 'headset pose ground truth exists at this frame’s timestamp.' },
+  { k: 'object_pose_available', s: 'obj pose',
+    d: 'object pose ground truth exists at this frame’s timestamp.' },
+];
+
+const state = { seq: 'P0011_72efb935', stream: 'rgb', sortKey: 'qa_pass', sortDir: 1,
+                hover: null, histHover: null };
+const el = (id) => document.getElementById(id);
+const sweep = new Map();      // seq -> {F, fps, dur, participant, objects, stats, disagree, failed}
+let current = null;           // decoded arrays for the selected recording
+let stripGeom = null, stripBase = null;
+let loadToken = 0;            // guards against a slow payload overwriting a newer selection
+
+/* ---------- mask statistics ---------- */
+
+function statOf(a, fps) {
+  let pass = 0, fail = 0, na = 0, longest = 0, run = 0, at = -1;
+  for (let i = 0; i < a.length; i++) {
+    const v = a[i];
+    if (v === 255) { na++; run = 0; continue; }
+    if (v === 0) { fail++; run++; if (run > longest) { longest = run; at = i - run + 1; } }
+    else { pass++; run = 0; }
+  }
+  const ann = pass + fail;
+  return { n: a.length, pass, fail, na, ann, rate: ann ? pass / ann : NaN,
+           longest, at, longestS: longest / (fps || 30) };
+}
+
+/** pull the masks out of a payload; the rest of the payload is not kept */
+function extract(p) {
+  const out = { seq: p.seq, F: p.F, fps: p.fps, dur: p.duration_s, participant: p.participant,
+                objects: p.summary ? p.summary.objects : null, stats: {}, disagree: {}, arrays: null };
+  const arrays = {};
+  for (const m of MASKS) {
+    out.stats[m.k] = {}; arrays[m.k] = {};
+    const per = {};
+    for (const st of STREAMS) {
+      const b = p.masks && p.masks[m.k] ? p.masks[m.k][st] : null;
+      if (!b) { out.stats[m.k][st] = null; arrays[m.k][st] = null; continue; }
+      const a = HOT3D.u8(b);
+      out.stats[m.k][st] = statOf(a, p.fps);
+      arrays[m.k][st] = a; per[st] = a;
+    }
+    let dis = 0, cmp = 0;
+    if (per.rgb && per.slam_left && per.slam_right) {
+      for (let i = 0; i < p.F; i++) {
+        const a = per.rgb[i], b = per.slam_left[i], c = per.slam_right[i];
+        if (a === 255 || b === 255 || c === 255) continue;
+        cmp++; if (a !== b || b !== c) dis++;
+      }
+    }
+    out.disagree[m.k] = { dis, cmp };
+  }
+  out.arrays = arrays;
+  return out;
+}
+
+/** is qa_pass the conjunction of the other six? computed, not assumed */
+function qaRelation(arrays, stream, F) {
+  const qa = arrays.qa_pass[stream];
+  if (!qa) return null;
+  const others = MASKS.slice(1).map(m => arrays[m.k][stream]).filter(Boolean);
+  if (!others.length) return null;
+  let qaOnly = 0, othersOnly = 0, cmp = 0;
+  for (let i = 0; i < F; i++) {
+    if (qa[i] === 255) continue;
+    let allOk = true, known = true;
+    for (const o of others) { if (o[i] === 255) { known = false; break; } if (o[i] === 0) allOk = false; }
+    if (!known) continue;
+    cmp++;
+    if (qa[i] === 1 && !allOk) qaOnly++;
+    else if (qa[i] === 0 && allOk) othersOnly++;
+  }
+  return { qaOnly, othersOnly, cmp, n: others.length };
+}
+
+/* ---------- strip chart ---------- */
+
+let stripOff = null;          // reused offscreen buffer, see drawStrip
+
+function clearStrip() {
+  const cv = el('strip');
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, cv.width, cv.height);
+}
+
+function drawStrip() {
+  const cv = el('strip');
+  if (!current) { clearStrip(); return; }
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const w = cv.clientWidth || 600, h = cv.clientHeight || 216;
+  cv.width = w * dpr; cv.height = h * dpr;
+  // one offscreen buffer for the life of the page: re-created on every redraw it would leave a
+  // new canvas surface behind on each theme toggle, resize and recording change
+  const off = stripOff || (stripOff = document.createElement('canvas'));
+  off.width = cv.width; off.height = cv.height;
+  const ctx = off.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  const mono0 = HOT3D.css('--mono') || 'monospace';
+  ctx.font = `11px ${mono0}`;
+  const full = Math.max(...MASKS.map(m => ctx.measureText(m.k).width));
+  const short = full + 10 > w * .35;            // long labels only when they leave room for the strip
+  const padL = Math.ceil((short ? Math.max(...MASKS.map(m => ctx.measureText(m.s).width)) : full) + 10);
+  const padR = 6, padT = 6, padB = 22;
+  const plotW = Math.max(40, w - padL - padR);
+  const rowH = (h - padT - padB) / MASKS.length;
+  const barH = Math.max(8, rowH - 5);
+  const ok = HOT3D.css('--ok'), bad = HOT3D.css('--bad'), na = HOT3D.css('--line-2');
+  const F = current.F, stream = state.stream;
+  ctx.textBaseline = 'middle';
+
+  MASKS.forEach((m, r) => {
+    const y = padT + r * rowH + (rowH - barH) / 2;
+    ctx.fillStyle = HOT3D.css('--ink-2');
+    ctx.textAlign = 'left';
+    ctx.fillText(short ? m.s : m.k, 2, y + barH / 2);
+
+    const a = current.arrays[m.k][stream];
+    if (!a) {                                   // the payload carries no mask for this stream
+      ctx.fillStyle = HOT3D.css('--muted');
+      ctx.fillText('no mask for this stream in the payload', padL, y + barH / 2);
+      return;
+    }
+    const st = current.stats[m.k][stream];
+    if (st.ann === 0) {                         // present but never annotated
+      ctx.fillStyle = na; ctx.globalAlpha = .55;
+      ctx.fillRect(padL, y, plotW, barH); ctx.globalAlpha = 1;
+      ctx.fillStyle = HOT3D.css('--muted');
+      ctx.fillText('not annotated on this stream', padL + 6, y + barH / 2);
+      return;
+    }
+    for (let px = 0; px < plotW; px++) {
+      const i0 = Math.floor(px * F / plotW);
+      const i1 = Math.max(i0 + 1, Math.floor((px + 1) * F / plotW));
+      let fail = 0, miss = 0, n = 0;
+      for (let i = i0; i < i1 && i < F; i++) { n++; const v = a[i]; if (v === 255) miss++; else if (v === 0) fail++; }
+      if (!n) continue;
+      if (miss === n) { ctx.fillStyle = na; ctx.globalAlpha = .7; }
+      else if (fail === 0) { ctx.fillStyle = ok; ctx.globalAlpha = .82; }
+      else { ctx.fillStyle = bad; ctx.globalAlpha = fail / (n - miss) >= .5 ? 1 : .62; }
+      ctx.fillRect(padL + px, y, 1.02, barH);
+      ctx.globalAlpha = 1;
+    }
+    ctx.strokeStyle = HOT3D.css('--line');
+    ctx.lineWidth = 1;
+    ctx.strokeRect(padL + .5, y + .5, plotW - 1, barH - 1);
+  });
+
+  // time axis, from the payload's own t array
+  ctx.fillStyle = HOT3D.css('--muted');
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  for (let g = 0; g <= 4; g++) {
+    const i = Math.round((F - 1) * g / 4);
+    const x = padL + plotW * g / 4;
+    ctx.fillText(`${current.t[i].toFixed(0)}s`, Math.min(Math.max(x, padL + 10), padL + plotW - 10), h - padB + 5);
+  }
+
+  stripBase = off;
+  stripGeom = { padL, padT, padB, plotW, rowH, barH, w, h, dpr, F };
+  paintStrip();
+}
+
+function paintStrip() {
+  const cv = el('strip');
+  if (!stripBase || !stripGeom) return;
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.drawImage(stripBase, 0, 0);
+  const g = stripGeom;
+  ctx.setTransform(g.dpr, 0, 0, g.dpr, 0, 0);
+  if (state.hover !== null) {
+    const x = Math.round(g.padL + g.plotW * state.hover / Math.max(g.F - 1, 1)) + .5;
+    ctx.strokeStyle = HOT3D.css('--ink'); ctx.globalAlpha = .55; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, g.padT); ctx.lineTo(x, g.h - g.padB); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+}
+
+function readoutText() {
+  const r = el('readout');
+  if (!current) return;
+  const stream = state.stream;
+  if (state.hover === null) {
+    const st = current.stats.qa_pass[stream];
+    r.textContent = st && st.ann
+      ? `${current.seq} · ${stream} · ${HOT3D.fmt.n(current.F)} frames · qa_pass ${HOT3D.fmt.pct(st.rate)} — point at the chart to read one frame.`
+      : `${current.seq} · ${stream} — no qa_pass mask on this stream.`;
+    return;
+  }
+  const i = state.hover;
+  const failing = [], missing = [];
+  for (const m of MASKS) {
+    const a = current.arrays[m.k][stream];
+    if (!a) { missing.push(m.k); continue; }
+    if (a[i] === 255) missing.push(m.k);
+    else if (a[i] === 0) failing.push(m.k);
+  }
+  const bits = [`t ${HOT3D.fmt.clock(current.t[i])}`, `frame ${i}`, stream];
+  // a 255 is neither a pass nor a failure, so a frame with no annotation at all must not be
+  // reported as passing; only the masks that carry a verdict here can be spoken for
+  const known = MASKS.length - missing.length;
+  if (failing.length) bits.push(`fail: ${failing.join(', ')}`);
+  else if (!known) bits.push('not annotated on this stream — no mask carries a verdict here');
+  else if (known === MASKS.length) bits.push(`all ${MASKS.length} masks pass`);
+  else bits.push(`the ${known} mask${known === 1 ? '' : 's'} annotated here pass`);
+  if (missing.length && known) bits.push(`not annotated: ${missing.join(', ')}`);
+  r.textContent = bits.join(' · ');
+}
+
+/* ---------- per-mask table beside the strip ---------- */
+
+function renderRates() {
+  const tb = el('rateBody'), stream = state.stream;
+  if (!current) return;
+  const rows = [];
+  const naByMask = [];
+  for (const m of MASKS) {
+    const st = current.stats[m.k][stream];
+    if (!st) {
+      rows.push(`<tr><td>${m.s}</td><td colspan="3" class="note">no mask for this stream</td></tr>`);
+      continue;
+    }
+    naByMask.push([m.k, st.na]);
+    if (st.ann === 0) {
+      rows.push(`<tr><td>${m.s}</td><td colspan="3" class="note">not annotated</td></tr>`);
+      continue;
+    }
+    const col = st.rate >= .99 ? 'var(--ok)' : st.rate >= .9 ? 'var(--ink)' : 'var(--bad)';
+    rows.push(
+      `<tr><td>${m.s}</td>` +
+      `<td class="num" style="color:${col}">${HOT3D.fmt.pct(st.rate)}</td>` +
+      `<td class="num">${HOT3D.fmt.n(st.fail)}</td>` +
+      `<td class="num">${st.longest ? HOT3D.fmt.s(st.longestS, 1) : '—'}</td></tr>`);
+  }
+  tb.innerHTML = rows.join('');
+
+  // 255 counts are per mask, not per stream: count the frames themselves rather than reporting
+  // one mask's count as if it applied to every rate in the table
+  const note = el('naNote');
+  const arrs = MASKS.map(m => current.arrays[m.k][stream]).filter(Boolean);
+  if (!arrs.length) {
+    note.textContent = 'This payload carries no masks for this stream.';
+  } else {
+    let naAny = 0, naAll = 0;
+    for (let i = 0; i < current.F; i++) {
+      let n = 0;
+      for (const a of arrs) if (a[i] === 255) n++;
+      if (n) naAny++;
+      if (n === arrs.length) naAll++;
+    }
+    const hit = naByMask.filter(([, n]) => n > 0);
+    const maxNa = hit.length ? Math.max(...hit.map(([, n]) => n)) : 0;
+    note.textContent = naAny
+      ? `${HOT3D.fmt.n(naAny)} frame${naAny === 1 ? '' : 's'} on this stream carr${naAny === 1 ? 'ies' : 'y'} 255 ` +
+        `(not annotated) on at least one mask, and ${naAny === 1 ? 'is' : 'are'} excluded from that mask's rate above; ` +
+        `${HOT3D.fmt.n(naAll)} of those carr${naAll === 1 ? 'ies' : 'y'} 255 on all ${arrs.length}. ` +
+        `${hit.length} of the ${arrs.length} masks ${hit.length === 1 ? 'is' : 'are'} affected, ` +
+        `at most ${HOT3D.fmt.n(maxNa)} frame${maxNa === 1 ? '' : 's'} each.`
+      : `Every frame on this stream is annotated for all ${arrs.length} masks.`;
+  }
+
+  const rel = qaRelation(current.arrays, stream, current.F);
+  const q = el('qaRel');
+  if (!rel) { q.textContent = ''; return; }
+  if (!rel.cmp) {
+    q.textContent = `On ${current.seq}, stream ${stream}, no frame is annotated for ` +
+      `qa_pass and the other masks at once, so the two cannot be compared here.`;
+    return;
+  }
+  // rel.n is however many of the other masks this stream actually carries — not assumed to be six
+  const verdict = (rel.qaOnly || rel.othersOnly) ? `is not the conjunction of the other ${rel.n}`
+                                                 : `agrees with the conjunction of the other ${rel.n} on every frame`;
+  q.innerHTML = `On ${current.seq}, stream ${stream}, <code>qa_pass</code> ${verdict}: ` +
+    `over ${HOT3D.fmt.n(rel.cmp)} comparable frames it passes ${HOT3D.fmt.n(rel.qaOnly)} frames on which at least one other mask is 0, ` +
+    `and rejects ${HOT3D.fmt.n(rel.othersOnly)} frames on which all ${rel.n} others are 1. Filtering by <code>qa_pass</code> alone is therefore ` +
+    `not the same as requiring the signal a method actually reads.`;
+}
+
+/* ---------- load one recording in full ---------- */
+
+async function loadSelected(seq) {
+  // payloads are 3–7 MB, so two quick changes of the select can finish out of order; only the
+  // newest request is allowed to write to the page
+  const token = ++loadToken;
+  el('readout').textContent = `Loading ${seq} payload…`;
+  el('rateBody').innerHTML = '<tr><td colspan="4" class="loading">reading…</td></tr>';
+  try {
+    const p = await HOT3D.sequence(seq);
+    if (token !== loadToken) return;
+    const ex = extract(p);
+    ex.t = HOT3D.f32(p.t);
+    current = ex;
+    if (!sweep.has(seq)) { sweep.set(seq, ex); renderHeat(); }
+    el('seqMeta').textContent =
+      `${ex.participant} · ${HOT3D.fmt.n(ex.F)} frames · ${HOT3D.fmt.s(ex.dur, 1)} · ${ex.objects} objects`;
+    state.hover = null;
+    drawStrip(); renderRates(); readoutText();
+  } catch (e) {
+    if (token !== loadToken) return;
+    // nothing on the panel may keep describing the recording that is no longer selected
+    current = null; stripBase = null; stripGeom = null; state.hover = null;
+    clearStrip();
+    el('seqMeta').textContent = '—';
+    el('naNote').textContent = '';
+    el('qaRel').textContent = '';
+    el('readout').textContent = `Could not read data/seq/${seq}.json (${e.message}).`;
+    el('rateBody').innerHTML = '<tr><td colspan="4" class="note">payload unavailable</td></tr>';
+  }
+}
+
+/* ---------- sweep of all twelve ---------- */
+
+async function sweepAll() {
+  const queue = FEATURED.slice();
+  let done = 0, failed = 0;
+  const note = el('sweepNote');
+  const one = async (seq) => {
+    try {
+      // the selected recording is already cached by the runtime; the rest are read once and
+      // released, so only the masks stay in memory rather than twelve whole payloads
+      let p;
+      if (seq === state.seq) { p = await HOT3D.sequence(seq); }
+      else {
+        const r = await fetch(`data/seq/${seq}.json`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        p = await r.json();
+      }
+      if (!sweep.has(seq)) sweep.set(seq, extract(p));
+    } catch (e) {
+      failed++; sweep.set(seq, { seq, failed: true });
+    }
+    done++;
+    note.textContent = done < FEATURED.length
+      ? `Reading the twelve sequence payloads — ${done} of ${FEATURED.length}…`
+      : '';
+    renderHeat();
+  };
+  const workers = new Array(3).fill(0).map(async () => {
+    while (queue.length) await one(queue.shift());
+  });
+  await Promise.all(workers);
+  note.textContent = failed
+    ? `${failed} of ${FEATURED.length} payloads could not be read; the table shows the rest.`
+    : `Computed from all ${FEATURED.length} featured payloads (${HOT3D.fmt.n(totalFrames())} frames).`;
+  note.className = 'note';
+  renderDefs();
+  closingExample();
+}
+
+/** the sharpest case among the twelve: lowest object_pose_available against its own qa_pass */
+function closingExample() {
+  const rows = [...sweep.values()].filter(ex => !ex.failed);
+  let worst = null;
+  for (const ex of rows) {
+    const op = ex.stats.object_pose_available.rgb, qa = ex.stats.qa_pass.rgb;
+    if (!op || !op.ann || !qa || !qa.ann) continue;
+    if (!worst || op.rate < worst.op.rate) worst = { ex, op, qa };
+  }
+  if (!worst) return;
+  el('closingEx').innerHTML =
+    `The sharpest case among the twelve is <code>${worst.ex.seq}</code>: ` +
+    `<span class="mono">${HOT3D.fmt.pct(worst.qa.rate)}</span> of its ${HOT3D.fmt.n(worst.ex.F)} RGB frames pass ` +
+    `<code>qa_pass</code>, but only <span class="mono">${HOT3D.fmt.pct(worst.op.rate)}</span> carry an object pose — ` +
+    `a single run of ${HOT3D.fmt.s(worst.op.longestS, 1)} with no object pose at all, out of ` +
+    `${HOT3D.fmt.s(worst.ex.dur, 1)} recorded.`;
+}
+
+function totalFrames() {
+  let n = 0;
+  for (const ex of sweep.values()) if (!ex.failed) n += ex.F;
+  return n;
+}
+
+function renderDefs() {
+  const ready = [...sweep.values()].filter(ex => !ex.failed);
+  el('defsBody').innerHTML = MASKS.map(m => {
+    let cell = '<span class="loading">reading payloads…</span>';
+    if (ready.length) {
+      let dis = 0, recs = 0, cmp = 0;
+      for (const ex of ready) {
+        const d = ex.disagree[m.k];
+        if (!d) continue;
+        dis += d.dis; cmp += d.cmp; if (d.dis) recs++;
+      }
+      // no comparable frame is not the same as agreement on every frame
+      cell = cmp === 0
+        ? '<span class="note">not comparable — no frame is annotated on all three streams</span>'
+        : dis === 0
+          ? `<span style="color:var(--ok)">identical on all three</span> — ${HOT3D.fmt.n(cmp)} frames compared`
+          : `differs on <span class="mono">${HOT3D.fmt.n(dis)}</span> of ${HOT3D.fmt.n(cmp)} frames, in ${recs} of ${ready.length} recordings`;
+    }
+    return `<tr><td>${m.k}</td><td>${m.d}</td><td>${cell}</td></tr>`;
+  }).join('');
+}
+
+/* ---------- heat table across the twelve ---------- */
+
+function heatColour(rate) {
+  if (!isFinite(rate)) return 'var(--surface)';
+  const pct = Math.round(55 * Math.sqrt(Math.max(0, 1 - rate)));
+  return `color-mix(in srgb, var(--bad) ${pct}%, var(--surface))`;
+}
+
+function renderHeat() {
+  const head = el('heatHead'), body = el('heatBody'), stream = state.stream;
+  const cols = [{ k: 'seq', label: 'recording' }, { k: 'F', label: 'frames', num: true }]
+    .concat(MASKS.map(m => ({ k: m.k, label: m.s, num: true, mask: true })));
+  head.innerHTML = cols.map(c => {
+    const cur = state.sortKey === c.k ? (state.sortDir > 0 ? ' ↑' : ' ↓') : '';
+    return `<th class="${c.num ? 'num ' : ''}rot" data-k="${c.k}">${c.label}${cur}</th>`;
+  }).join('');
+  head.querySelectorAll('th').forEach(th => th.addEventListener('click', () => {
+    const k = th.dataset.k;
+    if (state.sortKey === k) state.sortDir *= -1; else { state.sortKey = k; state.sortDir = 1; }
+    renderHeat();
+  }));
+
+  const rows = [...sweep.values()].filter(ex => !ex.failed);
+  const val = (ex, k) => {
+    if (k === 'seq') return ex.seq;
+    if (k === 'F') return ex.F;
+    const st = ex.stats[k] ? ex.stats[k][stream] : null;
+    return st && st.ann ? st.rate : NaN;
+  };
+  rows.sort((a, b) => {
+    const x = val(a, state.sortKey), y = val(b, state.sortKey);
+    if (typeof x === 'string') return state.sortDir * x.localeCompare(y);
+    const xa = isFinite(x) ? x : Infinity, ya = isFinite(y) ? y : Infinity;
+    return state.sortDir * (xa - ya);
+  });
+
+  body.innerHTML = rows.map(ex => {
+    const cells = MASKS.map(m => {
+      const st = ex.stats[m.k] ? ex.stats[m.k][stream] : null;
+      if (!st) return '<td class="heat note" title="no mask for this stream in this payload">no mask</td>';
+      if (!st.ann) return '<td class="heat note" title="every frame is 255 on this stream">not annot.</td>';
+      const t = `${m.k} / ${stream}: ${HOT3D.fmt.n(st.pass)} of ${HOT3D.fmt.n(st.ann)} frames pass`;
+      return `<td class="heat" style="background:${heatColour(st.rate)}" title="${t}">${(st.rate * 100).toFixed(1)}</td>`;
+    }).join('');
+    const sel = ex.seq === state.seq ? ' style="font-weight:600"' : '';
+    return `<tr${sel}><td class="mono">${ex.seq}</td><td class="num">${HOT3D.fmt.n(ex.F)}</td>${cells}</tr>`;
+  }).join('') || '<tr><td colspan="9" class="loading">reading payloads…</td></tr>';
+
+  const worst = el('worstList');
+  if (rows.length < 2) { worst.innerHTML = ''; return; }
+  worst.innerHTML = MASKS.map(m => {
+    let best = null;
+    for (const ex of rows) {
+      const st = ex.stats[m.k] ? ex.stats[m.k][stream] : null;
+      if (!st || !st.ann) continue;
+      if (!best || st.rate < best.rate) best = { rate: st.rate, seq: ex.seq, st };
+    }
+    if (!best) return `<li><span class="mono">${m.k}</span> — not annotated on ${stream} in any of these recordings</li>`;
+    if (best.st.fail === 0) {
+      return `<li><span class="mono">${m.k}</span>: never 0 on ${stream} in any of the ${rows.length}</li>`;
+    }
+    return `<li>worst <span class="mono">${m.k}</span>: <code>${best.seq}</code> at ` +
+           `<span class="mono">${HOT3D.fmt.pct(best.rate)}</span> ` +
+           `(${HOT3D.fmt.n(best.st.fail)} frames rejected, worst run ${HOT3D.fmt.s(best.st.longestS, 1)})</li>`;
+  }).join('');
+}
+
+/* ---------- the 198-recording distribution ---------- */
+
+const NB = 20;
+let histData = null;
+
+function drawHist() {
+  const cv = el('hist');
+  if (!histData) return;
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const w = cv.clientWidth || 600, h = cv.clientHeight || 232;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  const padL = 34, padR = 8, padT = 12, padB = 24;
+  const plotW = w - padL - padR, plotH = h - padT - padB;
+  const mono = HOT3D.css('--mono') || 'monospace';
+  const maxN = Math.max(...histData.bins);
+  const y = (n) => padT + plotH * (1 - n / maxN);
+
+  ctx.font = `10.5px ${mono}`;
+  ctx.strokeStyle = HOT3D.css('--line'); ctx.fillStyle = HOT3D.css('--muted');
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (let g = 0; g <= 4; g++) {
+    const n = maxN * g / 4, yy = Math.round(y(n)) + .5;
+    ctx.globalAlpha = .6; ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(w - padR, yy); ctx.stroke();
+    ctx.globalAlpha = 1; ctx.fillText(String(Math.round(n)), padL - 5, yy);
+  }
+  const bw = plotW / NB;
+  histData.bins.forEach((n, i) => {
+    if (!n) return;
+    const x = padL + i * bw;
+    const hi = (i + 1) / NB;
+    ctx.fillStyle = hi <= 0.9 ? HOT3D.css('--bad') : HOT3D.css('--ok');
+    ctx.globalAlpha = state.histHover === i ? 1 : .8;
+    const top = Math.min(y(n), padT + plotH - 2);
+    ctx.fillRect(x + 1, top, Math.max(1, bw - 2), padT + plotH - top);
+    ctx.globalAlpha = 1;
+    if (bw >= 13) {
+      ctx.fillStyle = HOT3D.css('--muted');
+      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.fillText(String(n), x + bw / 2, top - 2);
+    }
+  });
+  // the 90% line
+  const x90 = padL + plotW * .9;
+  ctx.strokeStyle = HOT3D.css('--ink-2'); ctx.globalAlpha = .7;
+  ctx.setLineDash([3, 3]); ctx.beginPath();
+  ctx.moveTo(x90, padT); ctx.lineTo(x90, padT + plotH); ctx.stroke();
+  ctx.setLineDash([]); ctx.globalAlpha = 1;
+  ctx.fillStyle = HOT3D.css('--ink-2'); ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+  ctx.fillText('90%', x90 - 4, padT + 1);
+
+  ctx.fillStyle = HOT3D.css('--muted'); ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  for (let g = 0; g <= 4; g++) {                      // clamped, or "100%" runs off the right edge
+    const xx = padL + plotW * g / 4;
+    ctx.fillText(`${g * 25}%`, Math.min(Math.max(xx, padL), w - padR - 16), padT + plotH + 6);
+  }
+}
+
+/* ---------- index-level figures ---------- */
+
+async function loadIndex() {
+  try {
+    const ix = await HOT3D.index();
+    const aria = ix.sequences.filter(r => r.device === 'Aria');
+    const withQa = aria.filter(r => r.qa_pass_rgb !== null && r.qa_pass_rgb !== undefined);
+    const noGt = aria.filter(r => !r.have_gt);
+    const noQa = aria.filter(r => r.qa_pass_rgb === null || r.qa_pass_rgb === undefined);
+    const sameSet = noGt.length === noQa.length && noGt.every(r => r.qa_pass_rgb === null || r.qa_pass_rgb === undefined);
+    const vals = withQa.map(r => r.qa_pass_rgb).sort((a, b) => a - b);
+    const median = vals.length % 2 ? vals[(vals.length - 1) / 2]
+                                   : (vals[vals.length / 2 - 1] + vals[vals.length / 2]) / 2;
+    const below = vals.filter(v => v < .9).length;
+    const clean = vals.filter(v => v >= .99).length;
+    let frames = 0, passed = 0;
+    for (const r of withQa) { frames += r.rgb_frames; passed += r.rgb_frames * r.qa_pass_rgb; }
+    const worst = withQa.reduce((a, b) => (b.qa_pass_rgb < a.qa_pass_rgb ? b : a));
+
+    el('fAria').textContent = HOT3D.fmt.n(aria.length);
+    el('fQa').textContent = HOT3D.fmt.n(withQa.length);
+    el('fNoGt').textContent = HOT3D.fmt.n(noGt.length);
+    el('fMedian').textContent = HOT3D.fmt.pct(median);
+    el('fBelow').textContent = HOT3D.fmt.n(below);
+    el('fWeighted').textContent = HOT3D.fmt.pct(passed / frames);
+    el('figsNote').textContent =
+      `Computed from data/index.json: ${aria.length} Aria rows, of which ${withQa.length} carry a qa_pass_rgb and ` +
+      `${noGt.length} carry have_gt false. ` +
+      (sameSet ? 'The two sets coincide — a recording that holds back ground truth reports no frame count and no QA rate either.'
+               : 'The two sets do not coincide.');
+
+    const bins = new Array(NB).fill(0);
+    for (const v of vals) bins[Math.min(NB - 1, Math.floor(v * NB))]++;
+    histData = { bins, vals };
+    histData.caption =
+      `qa_pass_rgb for the ${withQa.length} Aria recordings that report it, in 5-point bins; ` +
+      `the ${noGt.length} recordings with have_gt false report none and are not in this chart. ` +
+      `Red bins fall below the 90% line.`;
+    drawHist();
+    el('histCap').textContent = histData.caption;
+
+    el('tailFacts').className = '';
+    el('tailFacts').innerHTML =
+      `<div class="stack" style="gap:10px">
+        <div><span class="mono" style="font-size:18px">${HOT3D.fmt.n(below)}</span>
+          <span class="note">of ${withQa.length} recordings pass QA on under 90% of their RGB frames.</span></div>
+        <div><span class="mono" style="font-size:18px">${HOT3D.fmt.n(clean)}</span>
+          <span class="note">are at or above 99%.</span></div>
+        <div><span class="mono" style="font-size:18px">${HOT3D.fmt.pct(worst.qa_pass_rgb)}</span>
+          <span class="note">is the floor: <code>${worst.seq}</code> (${worst.participant},
+          ${HOT3D.fmt.n(worst.rgb_frames)} frames, ${HOT3D.fmt.s(worst.duration_s, 0)}) passes QA on
+          ${worst.qa_pass_rgb === 0 ? 'no frame at all' : 'almost no frame'}, while shipping the same
+          files as every other recording.</span></div>
+        <div><span class="mono" style="font-size:18px">${HOT3D.fmt.n(noGt.length)}</span>
+          <span class="note">recordings ship no ground truth and no frame count; only their duration
+          (${Math.round(noGt.reduce((s, r) => s + r.duration_s, 0) / 60)} minutes of the
+          ${Math.round(aria.reduce((s, r) => s + r.duration_s, 0) / 60)} on the Aria side) is known from the index.</span></div>
+      </div>`;
+
+    el('closing').innerHTML =
+      `Counting recordings, or frames, overstates what is there. Of the ${HOT3D.fmt.n(frames)} annotated Aria RGB frames, ` +
+      `${HOT3D.fmt.pct(passed / frames)} pass <code>qa_pass</code>, and passing <code>qa_pass</code> is not the same as ` +
+      `carrying the signal a method depends on. Before a recording is used, the question is which mask that method needs, ` +
+      `and how long the longest stretch is where that mask is 0.`;
+  } catch (e) {
+    el('figsNote').textContent = `Could not read data/index.json (${e.message}); the figures above stay blank.`;
+    el('histCap').textContent = 'The distribution needs data/index.json, which could not be read.';
+    el('tailFacts').textContent = 'Unavailable: data/index.json could not be read.';
+  }
+}
+
+/* ---------- wiring ---------- */
+
+const sel = el('selSeq');
+sel.innerHTML = FEATURED.map(s => `<option value="${s}"${s === state.seq ? ' selected' : ''}>${s}</option>`).join('');
+sel.addEventListener('change', () => { state.seq = sel.value; loadSelected(state.seq); renderHeat(); });
+el('selStream').value = state.stream;
+el('selStream').addEventListener('change', (e) => {
+  state.stream = e.target.value;
+  state.hover = null;
+  drawStrip(); renderRates(); readoutText(); renderHeat();
+});
+
+const strip = el('strip');
+strip.addEventListener('pointermove', (e) => {
+  if (!stripGeom || !current) return;
+  const r = strip.getBoundingClientRect();
+  const x = e.clientX - r.left;
+  if (x < stripGeom.padL || x > stripGeom.padL + stripGeom.plotW) { state.hover = null; }
+  else {
+    const f = (x - stripGeom.padL) / stripGeom.plotW;
+    state.hover = Math.max(0, Math.min(current.F - 1, Math.round(f * (current.F - 1))));
+  }
+  paintStrip(); readoutText();
+});
+strip.addEventListener('pointerleave', () => { state.hover = null; paintStrip(); readoutText(); });
+
+const hist = el('hist');
+hist.addEventListener('pointermove', (e) => {
+  if (!histData) return;
+  const r = hist.getBoundingClientRect();
+  const padL = 34, padR = 8;
+  const plotW = r.width - padL - padR;
+  const i = Math.floor((e.clientX - r.left - padL) / plotW * NB);
+  state.histHover = (i >= 0 && i < NB) ? i : null;
+  drawHist();
+  if (state.histHover !== null) {
+    const n = histData.bins[state.histHover];
+    el('histCap').textContent =
+      `${state.histHover * 5}–${(state.histHover + 1) * 5}% qa_pass_rgb: ${n} recording${n === 1 ? '' : 's'}.`;
+  }
+});
+hist.addEventListener('pointerleave', () => {
+  state.histHover = null; drawHist();
+  if (histData) el('histCap').textContent = histData.caption || el('histCap').textContent;
+});
+
+let rt = null;
+addEventListener('resize', () => {
+  clearTimeout(rt);
+  rt = setTimeout(() => { drawStrip(); drawHist(); }, 150);
+});
+const redraw = () => { drawStrip(); drawHist(); };
+new MutationObserver(redraw).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+if (matchMedia('(prefers-color-scheme: dark)').addEventListener) {
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', redraw);
+}
+for (const [id, v] of [['swOk', '--ok'], ['swBad', '--bad'], ['swNa', '--line-2']]) {
+  el(id).style.background = `var(${v})`;
+}
+
+renderDefs();
+loadIndex();
+loadSelected(state.seq).then(sweepAll);
+</script>
+</body>
+</html>

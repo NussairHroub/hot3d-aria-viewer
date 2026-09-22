@@ -1,0 +1,884 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Eye gaze · HOT3D Aria</title>
+<meta name="description" content="The Aria eye-gaze signal in HOT3D: per-eye yaw, shared pitch and gaze depth in the Central Pupil Frame, their traces, vergence, and their distributions across the twelve featured recordings.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+<style>
+  .chart { width: 100%; height: 148px; }
+  .chart.tall { height: 300px; }
+  .chart.mid { height: 230px; }
+  .grid-2 { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); align-items: center; }
+  .legend i { display: inline-block; width: 20px; border-top: 2px solid var(--c-gaze); margin-right: 6px; vertical-align: middle; }
+  .legend i.dash { border-top-style: dashed; }
+  .readout { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 12.5px;
+             color: var(--ink-2); min-height: 1.5em; }
+  .chart-block + .chart-block { margin-top: 14px; }
+  .gaps { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .gaps span { display: inline-block; margin-right: 12px; white-space: nowrap; }
+  .kv { display: grid; gap: 6px 14px; grid-template-columns: max-content 1fr; font-size: 13.5px; }
+  .kv dt { color: var(--muted); font-family: var(--mono); font-size: 12.5px; }
+  .kv dd { margin: 0; }
+  .err { color: var(--bad); font-size: 13.5px; }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div class="page-head">
+    <p class="eyebrow">Signal · eye gaze</p>
+    <h1>Where the wearer looked, as four numbers per frame</h1>
+    <p class="lede">Aria's machine-perception service estimates gaze from the two eye cameras and
+    ships it as a yaw per eye, one shared pitch, and a gaze depth — all in the Central Pupil Frame,
+    a frame fixed between the eyes. This page reads that block out of the twelve featured
+    payloads: the traces, how the two eyes converge, and what the whole distribution looks like.</p>
+  </div>
+
+  <section class="figs" aria-label="Gaze across the twelve featured recordings">
+    <div class="fig"><div class="n" id="fRecs">—</div><div class="k">recordings read</div></div>
+    <div class="fig"><div class="n" id="fCov">—</div><div class="k">frames with gaze</div></div>
+    <div class="fig"><div class="n" id="fRate">—</div><div class="k">gaze update rate</div></div>
+    <div class="fig"><div class="n" id="fDepth">—</div><div class="k">median gaze depth</div></div>
+    <div class="fig"><div class="n" id="fPitch">—</div><div class="k">median pitch</div></div>
+    <div class="fig"><div class="n" id="fVerg">—</div><div class="k">median convergence</div></div>
+  </section>
+  <p class="loading" id="loadLine">reading the gaze block of 12 payloads…</p>
+
+  <h2>What the signal is</h2>
+  <p>Each payload carries one <code>gaze</code> block: <code>source</code>, and four per-frame
+  arrays of length <em>F</em> that line up one-to-one with the RGB video. Yaw and pitch are radians,
+  depth is metres. The ranges below are the 1st and 99th percentile over every finite frame of the
+  <span id="fieldScope">recordings read so far</span>, printed in degrees for the angles.</p>
+  <div class="table-wrap">
+    <table id="fieldTab">
+      <thead><tr>
+        <th class="no-sort">Field</th><th class="no-sort">Shape</th><th class="no-sort">Unit</th>
+        <th class="no-sort num">Observed 1–99%</th><th class="no-sort">What it is</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <p class="note" id="cpfNote">The Central Pupil Frame sits midway between the eyes and moves with
+  the headset, so these angles are relative to the head, not to the world. A yaw per eye plus one
+  shared pitch is the vergence form of the estimate: the two eyes are allowed to differ
+  horizontally, which is what makes a depth recoverable at all.</p>
+
+  <h3>Calibration carried by each recording</h3>
+  <p id="calLine" class="loading">reading <code>gaze.source</code> …</p>
+  <div class="table-wrap">
+    <table id="seqTab">
+      <thead><tr>
+        <th class="no-sort">Recording</th>
+        <th class="no-sort">Participant</th>
+        <th class="no-sort">Calibration</th>
+        <th class="no-sort num">Frames</th>
+        <th class="no-sort num">Missing</th>
+        <th class="no-sort num">Rate</th>
+        <th class="no-sort num">Med. yaw L</th>
+        <th class="no-sort num">Med. yaw R</th>
+        <th class="no-sort num">Med. pitch</th>
+        <th class="no-sort num">Med. depth</th>
+      </tr></thead>
+      <tbody id="seqBody"></tbody>
+    </table>
+  </div>
+
+  <h2>One recording, over time</h2>
+  <div class="row" style="margin-bottom:14px">
+    <label class="field">recording
+      <select id="pick"></select>
+    </label>
+    <span class="pill" id="pickSrc">—</span>
+    <span class="pill" id="pickFrames">—</span>
+  </div>
+  <div class="card" id="tracePanel">
+    <figure class="chart-block">
+      <div class="legend"><span><i></i>yaw left</span><span><i class="dash"></i>yaw right</span></div>
+      <canvas class="chart" id="cYaw"></canvas>
+      <figcaption id="capYaw">—</figcaption>
+    </figure>
+    <figure class="chart-block">
+      <canvas class="chart" id="cPitch"></canvas>
+      <figcaption id="capPitch">—</figcaption>
+    </figure>
+    <figure class="chart-block">
+      <canvas class="chart" id="cDepth"></canvas>
+      <figcaption id="capDepth">—</figcaption>
+    </figure>
+    <p class="readout" id="cursor">hover a chart to read the frame under the cursor</p>
+  </div>
+  <p id="missLine" class="note">—</p>
+  <p class="gaps" id="gapList"></p>
+  <p class="note" id="holdLine">—</p>
+
+  <h2>Vergence</h2>
+  <p>The two eyes do not point the same way: subtracting the right yaw from the left gives the
+  convergence angle, which grows as the fixation point comes closer. The released depth is the
+  same information expressed as a distance, and the two agree to within the precision of a
+  fixed interocular baseline.</p>
+  <figure class="chart-block">
+    <canvas class="chart" id="cVerg"></canvas>
+    <figcaption id="capVerg">—</figcaption>
+  </figure>
+  <div class="grid-2" style="margin-top:18px">
+    <figure>
+      <canvas class="chart mid" id="cScatter"></canvas>
+      <figcaption id="capScatter">—</figcaption>
+    </figure>
+    <div class="card">
+      <h3>What the angle implies</h3>
+      <dl class="kv" id="vergKv">
+        <dt>relation</dt><dd class="mono">z = b / (2·tan(θ/2))</dd>
+      </dl>
+      <p class="note" id="vergNote">—</p>
+    </div>
+  </div>
+
+  <h2>Distributions across the twelve recordings</h2>
+  <p id="distIntro" class="loading">waiting for all 12 payloads…</p>
+  <div class="grid-2">
+    <figure>
+      <canvas class="chart tall" id="cDens"></canvas>
+      <figcaption id="capDens">—</figcaption>
+    </figure>
+    <figure>
+      <canvas class="chart tall" id="cHist"></canvas>
+      <figcaption id="capHist">—</figcaption>
+    </figure>
+  </div>
+
+  <h2>Why no gaze dot is drawn on the video</h2>
+  <div class="warn-box">
+    <p>The payload gives gaze only in the Central Pupil Frame. It does not carry the transform from
+    that frame to the device, so the gaze direction cannot be moved into the RGB camera here, and
+    nothing on this site draws a gaze marker on an image.</p>
+  </div>
+  <p>Projecting it would take three things. First, <span class="mono">T_Device_CPF</span> — the pose
+  of the Central Pupil Frame in the device frame, which is part of the Aria device calibration and
+  is <em>not</em> in these payloads. Second, the camera extrinsics <span class="mono">T_Device_Camera</span>
+  for <span class="mono">camera-rgb</span>, which <em>are</em> in the payload's <code>cameras</code>
+  block, inverted to take a device point into the camera. Third, the fisheye model: the RGB camera
+  is <span class="mono" id="rgbModel">FISHEYE624</span> at
+  <span class="mono" id="rgbSize">1408×1408</span> with
+  <span class="mono" id="rgbParams">15</span> projection parameters
+  <span class="mono">[f, cx, cy, k1..k6, p1, p2, s1..s4]</span>, so the point has to go through that
+  distortion model rather than a pinhole.</p>
+  <p class="note">Gaze depth matters here too. The Central Pupil Frame and the RGB camera are a few
+  centimetres apart, so a gaze <em>ray</em> from the eyes does not land on one pixel — where it
+  projects depends on how far away the fixation is. The correct target is the 3D point at the
+  released depth along the gaze direction, projected from the camera; treating gaze as a
+  depth-free ray would be wrong by centimetres at arm's length, which at this field of view is
+  tens of pixels.</p>
+</main>
+
+<script>
+HOT3D.init();
+
+/* Featured recordings: the twelve that ship a payload (see the build's data/seq directory).
+   The page reads only the gaze block from each, so it fetches with plain fetch() and keeps the
+   few arrays it needs — caching twelve whole payloads through HOT3D.sequence() would hold tens
+   of megabytes of parsed JSON for no gain. */
+const FEATURED = [
+  'P0001_4bf4e21a', 'P0002_65085bfc', 'P0003_ebdc6ff7', 'P0009_e71e2f24',
+  'P0010_573b2de6', 'P0010_8ff3e5c4', 'P0011_2255f410', 'P0011_72efb935',
+  'P0012_130a66e1', 'P0014_1fdca00e', 'P0015_cc5dfd13', 'P0015_e7458eb3',
+];
+const FIRST = 'P0009_e71e2f24';          // read first: the widest depth range and the most gaps
+const DEG = 180 / Math.PI;
+const F = HOT3D.fmt;
+const $ = (id) => document.getElementById(id);
+
+/* ---------- small statistics, NaN-safe throughout ---------- */
+
+function sorted(a) {
+  const v = [];
+  for (let i = 0; i < a.length; i++) if (isFinite(a[i])) v.push(a[i]);
+  v.sort((x, y) => x - y);
+  return v;
+}
+function quant(s, p) {
+  if (!s.length) return NaN;
+  const i = (s.length - 1) * p, lo = Math.floor(i), hi = Math.ceil(i);
+  return s[lo] + (s[hi] - s[lo]) * (i - lo);
+}
+const median = (s) => quant(s, 0.5);
+function toDeg(a) {
+  const o = new Float32Array(a.length);
+  for (let i = 0; i < a.length; i++) o[i] = a[i] * DEG;
+  return o;
+}
+function diffArr(a, b) {                  // a - b, NaN where either is missing
+  const o = new Float32Array(a.length);
+  for (let i = 0; i < a.length; i++) o[i] = a[i] - b[i];
+  return o;
+}
+function meanArr(a, b) {
+  const o = new Float32Array(a.length);
+  for (let i = 0; i < a.length; i++) o[i] = (a[i] + b[i]) / 2;
+  return o;
+}
+/** runs of consecutive frames where the signal is missing */
+function gaps(a) {
+  const out = [];
+  let s = -1;
+  for (let i = 0; i <= a.length; i++) {
+    const bad = i < a.length && !isFinite(a[i]);
+    if (bad && s < 0) s = i;
+    if (!bad && s >= 0) { out.push([s, i - 1]); s = -1; }
+  }
+  return out;
+}
+/** runs of equal consecutive values: how often the service actually emits a new estimate.
+    A run is broken by a missing frame as well as by a change, so `runs` never spans a gap. */
+function runStats(a) {
+  let runs = 0, total = 0, len = 0, prev = NaN, open = false;
+  const close = () => { if (open) { runs++; total += len; } open = false; len = 0; };
+  for (let i = 0; i < a.length; i++) {
+    const v = a[i];
+    if (!isFinite(v)) { close(); prev = NaN; continue; }
+    if (open && v === prev) len++;
+    else { close(); len = 1; open = true; }
+    prev = v;
+  }
+  close();
+  return { runs, hold: runs ? total / runs : NaN };
+}
+const countNaN = (a) => { let n = 0; for (let i = 0; i < a.length; i++) if (!isFinite(a[i])) n++; return n; };
+
+/* ---------- loading ---------- */
+
+const recs = new Map();                   // seq -> gaze block, decoded
+
+async function loadGaze(seq) {
+  const r = await fetch(`data/seq/${seq}.json`);
+  if (!r.ok) throw new Error(`data/seq/${seq}.json: HTTP ${r.status}`);
+  const d = await r.json();
+  const g = d.gaze;
+  const rec = {
+    seq, participant: d.participant, F: d.F, duration: d.duration_s, fps: d.fps,
+    source: g.source,
+    t: HOT3D.f32(d.t),
+    yl: HOT3D.f32(g.yaw_l), yr: HOT3D.f32(g.yaw_r),
+    pi: HOT3D.f32(g.pitch), dp: HOT3D.f32(g.depth),
+    rgb: (d.cameras || []).find(c => c.label === 'camera-rgb') || null,
+  };
+  rec.verg = diffArr(rec.yl, rec.yr);     // left minus right, in radians
+  /* "missing" is measured over all four arrays, not over yaw alone: a field that drops out on
+     its own would otherwise be invisible in the coverage figure and in the table. */
+  const incomplete = new Float32Array(rec.F);
+  rec.missBy = { yl: 0, yr: 0, pi: 0, dp: 0 };
+  rec.miss = 0; rec.missAll = 0;
+  for (let i = 0; i < rec.F; i++) {
+    let n = 0;
+    for (const k of ['yl', 'yr', 'pi', 'dp']) if (!isFinite(rec[k][i])) { rec.missBy[k]++; n++; }
+    if (n) { rec.miss++; incomplete[i] = NaN; }
+    if (n === 4) rec.missAll++;
+  }
+  rec.together = rec.miss === rec.missAll;   // do the four arrays drop out on the same frames?
+  rec.gaps = gaps(incomplete);
+  const rs = runStats(rec.yl);
+  rec.runs = rs.runs; rec.hold = rs.hold;
+  rec.rate = rec.runs / Math.max(rec.duration, 1e-6);
+  rec.s = { yl: sorted(rec.yl), yr: sorted(rec.yr), pi: sorted(rec.pi),
+            dp: sorted(rec.dp), verg: sorted(rec.verg) };
+  // degrees for plotting, computed once so redraws stay cheap
+  rec.d = { yl: toDeg(rec.yl), yr: toDeg(rec.yr), pi: toDeg(rec.pi), conv: toDeg(rec.verg) };
+  for (let i = 0; i < rec.F; i++) rec.d.conv[i] = -rec.d.conv[i];   // positive convergence angle
+  return rec;
+}
+
+/* ---------- the per-recording table ---------- */
+
+function td(text, cls) {
+  const e = document.createElement('td');
+  if (cls) e.className = cls;
+  e.textContent = text;
+  return e;
+}
+function addRow(rec) {
+  const tr = document.createElement('tr');
+  /* each median is guarded on its own field: one array being empty must not blank the others */
+  const med = (key, f) => td(rec.s[key].length ? f(median(rec.s[key])) : '—', 'num');
+  tr.append(
+    td(F.seq(rec.seq), 'mono'),
+    td(rec.participant, 'mono'),
+    td(rec.source, 'mono'),
+    td(F.n(rec.F), 'num'),
+    td(rec.miss ? `${rec.miss} (${(100 * rec.miss / rec.F).toFixed(2)}%)` : '0', 'num'),
+    td(rec.runs ? `${rec.rate.toFixed(1)} Hz` : '—', 'num'),
+    med('yl', F.deg), med('yr', F.deg), med('pi', F.deg), med('dp', F.m),
+  );
+  rec.tr = tr;
+  $('seqBody').append(tr);
+}
+
+/* ---------- charts ---------- */
+
+const charts = [];                        // every canvas on the page, redrawn on theme and resize
+const timeCharts = [];                    // the trace charts, also redrawn when the cursor moves
+let cursorIdx = null;
+
+/** "signal absent" instead of an empty frame, so a field that is NaN throughout still reads */
+function blank(canvas, msg) {
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const w = canvas.clientWidth || 400, h = canvas.clientHeight || 140;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = HOT3D.css('--muted');
+  ctx.font = `12px ${HOT3D.css('--sans')}`;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText(msg, 8, h / 2);
+}
+
+function timeChart(canvasId, build) {
+  const canvas = $(canvasId);
+  const c = { canvas, geom: null, t: null, draw() {
+    const spec = build();
+    if (!spec) { blank(canvas, 'signal missing on every frame of this recording'); c.geom = null; return; }
+    c.t = spec.t;
+    c.geom = HOT3D.linePlot(canvas, spec.t, spec.series, spec.opts || {});
+    if (cursorIdx !== null && cursorIdx < spec.t.length) HOT3D.playhead(canvas, c.geom, spec.t, cursorIdx);
+  } };
+  canvas.addEventListener('pointermove', (ev) => {
+    if (!c.geom || !c.t) return;
+    const r = canvas.getBoundingClientRect(), g = c.geom;
+    const span = Math.max(g.w - g.padL - g.padR, 1);
+    const f = Math.min(Math.max((ev.clientX - r.left - g.padL) / span, 0), 1);
+    setCursor(Math.round(f * (c.t.length - 1)));
+  });
+  canvas.addEventListener('pointerleave', () => setCursor(null));
+  charts.push(c); timeCharts.push(c);
+  return c;
+}
+function plainChart(canvasId, draw) {
+  const c = { canvas: $(canvasId), draw: () => draw($(canvasId)) };
+  charts.push(c);
+  return c;
+}
+function redraw(list) { for (const c of list) { try { c.draw(); } catch (e) { /* keep the others */ } } }
+const redrawAll = () => redraw(charts);
+
+function setCursor(i) {
+  cursorIdx = i;
+  const rec = current();
+  if (rec && i !== null && i >= 0 && i < rec.F) {
+    const v = (x, f) => (isFinite(x) ? f(x) : 'missing');
+    $('cursor').textContent =
+      `t ${F.clock(rec.t[i])}  frame ${i}  ·  yaw L ${v(rec.yl[i], F.deg)}  yaw R ${v(rec.yr[i], F.deg)}` +
+      `  ·  pitch ${v(rec.pi[i], F.deg)}  ·  depth ${v(rec.dp[i], F.m)}` +
+      `  ·  convergence ${v(-rec.verg[i], F.deg)}`;
+  } else {
+    $('cursor').textContent = 'hover a chart to read the frame under the cursor';
+  }
+  redraw(timeCharts);
+}
+
+/* ---------- selected recording ---------- */
+
+function current() { return recs.get($('pick').value) || null; }
+
+const gazeCol = () => HOT3D.channel.gaze();
+const degFmt = (v) => `${v.toFixed(0)}°`;
+
+timeChart('cYaw', () => {
+  const r = current();
+  if (!r || (!r.s.yl.length && !r.s.yr.length)) return null;
+  return { t: r.t, opts: { fmt: degFmt },
+    series: [{ v: r.d.yl, color: gazeCol(), width: 1.4 },
+             { v: r.d.yr, color: gazeCol(), width: 1.4, dash: [4, 3] }] };
+});
+timeChart('cPitch', () => {
+  const r = current();
+  if (!r || !r.s.pi.length) return null;
+  return { t: r.t, opts: { fmt: degFmt }, series: [{ v: r.d.pi, color: gazeCol(), width: 1.4 }] };
+});
+timeChart('cDepth', () => {
+  const r = current();
+  if (!r || !r.s.dp.length) return null;
+  return { t: r.t, opts: { fmt: (v) => `${v.toFixed(1)} m` },
+           series: [{ v: r.dp, color: gazeCol(), width: 1.4 }] };
+});
+timeChart('cVerg', () => {
+  const r = current();
+  if (!r || !r.s.verg.length) return null;
+  return { t: r.t, opts: { fmt: (v) => `${v.toFixed(1)}°` },
+           series: [{ v: r.d.conv, color: gazeCol(), width: 1.4 }] };
+});
+
+function describeSelected() {
+  const r = current();
+  if (!r) return;
+  $('pickSrc').textContent = `${r.source} calibration`;
+  $('pickFrames').textContent = `${F.n(r.F)} frames · ${F.s(r.duration, 1)}`;
+  const empty = (s) => (s.length === 0);
+  const cap = (id, text) => { $(id).textContent = text; };
+
+  cap('capYaw', empty(r.s.yl) && empty(r.s.yr)
+    ? `${r.seq}: yaw is missing on every frame.`
+    : `Yaw per eye, degrees in the Central Pupil Frame, ${r.seq}. Solid left eye, dashed right; ` +
+      `medians ${F.deg(median(r.s.yl))} and ${F.deg(median(r.s.yr))}.`);
+  cap('capPitch', empty(r.s.pi)
+    ? `${r.seq}: pitch is missing on every frame.`
+    : `Pitch, degrees, shared by both eyes, ${r.seq}. Median ${F.deg(median(r.s.pi))}; ` +
+      `with the objects on a table below eye level, negative is downward.`);
+  cap('capDepth', empty(r.s.dp)
+    ? `${r.seq}: gaze depth is missing on every frame.`
+    : `Gaze depth, metres, ${r.seq}. Median ${F.m(median(r.s.dp))}, ` +
+      `1–99% ${F.m(quant(r.s.dp, .01))} to ${F.m(quant(r.s.dp, .99))}.`);
+  cap('capVerg', empty(r.s.verg)
+    ? `${r.seq}: yaw is missing on every frame, so there is no convergence angle.`
+    : `Convergence angle (yaw left − yaw right, sign flipped so it reads positive), degrees, ` +
+      `${r.seq}. Median ${F.deg(-median(r.s.verg))}.`);
+
+  const pct = r.miss / r.F;
+  /* whether the four arrays drop out together is read off this recording, never assumed */
+  const byField = ['yl', 'yr', 'pi', 'dp'].map((k, j) =>
+    `${['yaw_l', 'yaw_r', 'pitch', 'depth'][j]} ${F.n(r.missBy[k])}`).join(', ');
+  $('missLine').innerHTML = r.miss === 0
+    ? `Gaze is present on all <span class="mono">${F.n(r.F)}</span> frames of this recording.`
+    : `Gaze is incomplete on <span class="mono">${F.n(r.miss)}</span> of ` +
+      `<span class="mono">${F.n(r.F)}</span> frames (<span class="mono">${F.pct(pct, 2)}</span>). ` +
+      (r.together
+        ? `All four arrays drop out on the same frames — there is no frame here with a yaw but no depth.`
+        : `They do not drop out together: <span class="mono">${byField}</span>, and only ` +
+          `<span class="mono">${F.n(r.missAll)}</span> frames are missing all four.`);
+  const gl = r.gaps.map(([a, b]) =>
+    `<span>${F.clock(r.t[a])}–${F.clock(r.t[b])} (${b - a + 1}f)</span>`);
+  $('gapList').innerHTML = gl.length === 0 ? ''
+    : `<span>missing runs:</span>` +
+      (gl.length <= 12 ? gl.join('') : gl.slice(0, 12).join('') + `<span>+${gl.length - 12} more</span>`);
+
+  $('holdLine').textContent = r.runs === 0 ? ''
+    : `The value takes ${F.n(r.runs)} distinct estimates in ${F.s(r.duration, 1)} — ` +
+      `${r.rate.toFixed(1)} Hz. The video runs at ${r.fps} fps, so each estimate is held across ` +
+      `${r.hold.toFixed(1)} consecutive frames on average; the steps in these traces are the ` +
+      `service's own rate, not noise.`;
+}
+
+/* ---------- vergence vs depth scatter ---------- */
+
+let baseline = NaN, vergCorr = NaN;       // computed across all twelve once they are read
+
+plainChart('cScatter', (canvas) => {
+  const r = current();
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const w = canvas.clientWidth || 400, h = canvas.clientHeight || 230;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  if (!r || !r.s.dp.length || !r.s.verg.length) {
+    ctx.fillStyle = HOT3D.css('--muted');
+    ctx.font = `12px ${HOT3D.css('--sans')}`;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText('no frame in this recording has both a depth and two yaws', 10, h / 2);
+    $('capScatter').textContent = r
+      ? `${r.seq} carries no frame with both a gaze depth and a yaw per eye, so there is nothing to plot against each other.`
+      : 'Waiting for a recording.';
+    return;
+  }
+  const padL = 46, padR = 10, padT = 10, padB = 26;
+  const xMax = Math.max(-quant(r.s.verg, .002) * DEG, 1);
+  const yLo = Math.log10(Math.max(quant(r.s.dp, .002), .05)), yHi = Math.log10(Math.max(quant(r.s.dp, .998), .2));
+  const X = (deg) => padL + (w - padL - padR) * Math.min(deg / xMax, 1);
+  const Y = (m) => h - padB - (h - padT - padB) *
+    (Math.min(Math.max(Math.log10(m), yLo), yHi) - yLo) / Math.max(yHi - yLo, 1e-9);
+
+  ctx.strokeStyle = HOT3D.css('--line'); ctx.fillStyle = HOT3D.css('--muted');
+  ctx.font = `11px ${HOT3D.css('--mono')}`; ctx.lineWidth = 1;
+  for (const m of [0.1, 0.2, 0.5, 1, 2, 4]) {
+    if (Math.log10(m) < yLo - 1e-9 || Math.log10(m) > yHi + 1e-9) continue;
+    const yy = Math.round(Y(m)) + .5;
+    ctx.globalAlpha = .6; ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(w - padR, yy); ctx.stroke();
+    ctx.globalAlpha = 1; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ctx.fillText(`${m} m`, padL - 6, yy);
+  }
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  for (let g = 0; g <= 4; g++) ctx.fillText(`${(xMax * g / 4).toFixed(0)}°`, X(xMax * g / 4), h - padB + 5);
+
+  ctx.fillStyle = gazeCol(); ctx.globalAlpha = .22;
+  for (let i = 0; i < r.F; i++) {
+    const v = -r.verg[i] * DEG, z = r.dp[i];
+    if (!isFinite(v) || !isFinite(z)) continue;
+    ctx.fillRect(X(v) - 1, Y(z) - 1, 2, 2);
+  }
+  ctx.globalAlpha = 1;
+  if (isFinite(baseline)) {                       // z = b / (2 tan(theta/2))
+    ctx.strokeStyle = HOT3D.css('--ink'); ctx.globalAlpha = .55;
+    ctx.setLineDash([4, 3]); ctx.lineWidth = 1.2; ctx.beginPath();
+    let pen = false;
+    for (let px = 0; px <= 200; px++) {
+      const deg = xMax * px / 200;
+      if (deg <= 0.05) continue;
+      const z = baseline / (2 * Math.tan(deg / DEG / 2));
+      if (Math.log10(z) < yLo || Math.log10(z) > yHi) { pen = false; continue; }
+      if (!pen) { ctx.moveTo(X(deg), Y(z)); pen = true; } else ctx.lineTo(X(deg), Y(z));
+    }
+    ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+  }
+  ctx.strokeStyle = HOT3D.css('--line-2');
+  ctx.strokeRect(padL + .5, padT + .5, w - padL - padR - 1, h - padT - padB - 1);
+  $('capScatter').textContent =
+    `Released gaze depth against convergence angle, one dot per frame, ${r.seq}. ` +
+    (isFinite(baseline)
+      ? `The dashed curve is z = b / (2·tan(θ/2)) with b = ${F.cm(baseline)}, the median baseline implied by all ${recs.size} recordings.`
+      : `The implied-baseline curve is drawn once all ${FEATURED.length} recordings are read.`);
+});
+
+/* ---------- distributions across all twelve ---------- */
+
+let pool = null;   // {yaw:[], pitch:[], depth:[], vergAbs:[]} in degrees / metres, all recordings
+
+function buildPool() {
+  const yaw = [], pitch = [], depth = [], vergAbs = [];
+  let frames = 0, missing = 0, finite = 0, negVerg = 0, clipped = 0, duration = 0;
+  let sumRate = 0, nRate = 0;
+  const bl = [], invZ = [], vg = [];
+  /* The far end of the released depth is a clamp: many frames share one maximum value. Read that
+     value off the data rather than assuming it, and keep those frames out of the baseline fit. */
+  let zMax = -Infinity;
+  for (const r of recs.values()) if (r.s.dp.length) zMax = Math.max(zMax, r.s.dp[r.s.dp.length - 1]);
+  const clampAt = isFinite(zMax) ? zMax - 1e-3 : Infinity;
+  for (const seq of FEATURED) {
+    const r = recs.get(seq);
+    if (!r) continue;
+    frames += r.F; missing += r.miss; duration += r.duration;
+    if (r.s.yl.length) { sumRate += r.rate; nRate++; }
+    const ym = meanArr(r.yl, r.yr);
+    for (let i = 0; i < r.F; i++) {
+      const v = r.verg[i], z = r.dp[i], p = r.pi[i];
+      if (!isFinite(v) || !isFinite(z) || !isFinite(p)) continue;
+      finite++;
+      if (v < 0) negVerg++;
+      yaw.push(ym[i] * DEG); pitch.push(p * DEG); depth.push(z); vergAbs.push(Math.abs(v) * DEG);
+      if (z >= clampAt) { clipped++; continue; }         // the far clamp would bias the baseline
+      bl.push(2 * z * Math.tan(Math.abs(v) / 2));
+      invZ.push(1 / z); vg.push(Math.abs(v));
+    }
+  }
+  // Pearson correlation between 1/depth and the convergence angle
+  const n = invZ.length;
+  if (n > 2) {
+    let mx = 0, my = 0;
+    for (let i = 0; i < n; i++) { mx += invZ[i]; my += vg[i]; }
+    mx /= n; my /= n;
+    let sxy = 0, sxx = 0, syy = 0;
+    for (let i = 0; i < n; i++) {
+      const a = invZ[i] - mx, b = vg[i] - my;
+      sxy += a * b; sxx += a * a; syy += b * b;
+    }
+    vergCorr = sxy / Math.sqrt(sxx * syy);
+  }
+  baseline = median(sorted(bl));
+  const asc = (a) => a.slice().sort((x, y) => x - y);      // sorted once; redraws reuse these
+  return { yaw, pitch, depth, vergAbs, frames, missing, finite, negVerg, clipped, duration, zMax,
+           yawS: asc(yaw), pitchS: asc(pitch), depthS: asc(depth), vergS: asc(vergAbs),
+           rate: nRate ? sumRate / nRate : NaN };
+}
+
+plainChart('cDens', (canvas) => {
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const w = canvas.clientWidth || 400, h = canvas.clientHeight || 300;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  if (!pool || !pool.yaw.length) return;
+  const padL = 44, padR = 10, padT = 10, padB = 28;
+  const xs = pool.yawS, ys = pool.pitchS;
+  const x0 = Math.floor(quant(xs, .002) / 5) * 5, x1 = Math.ceil(quant(xs, .998) / 5) * 5;
+  const y0 = Math.floor(quant(ys, .002) / 5) * 5, y1 = Math.ceil(quant(ys, .998) / 5) * 5;
+  const pw = w - padL - padR, ph = h - padT - padB;
+  const nx = 72, ny = Math.max(12, Math.round(nx * ph / pw));
+  const grid = new Float64Array(nx * ny);
+  let peak = 0, plotted = 0;
+  for (let i = 0; i < pool.yaw.length; i++) {
+    const cx = Math.floor((pool.yaw[i] - x0) / (x1 - x0) * nx);
+    const cy = Math.floor((y1 - pool.pitch[i]) / (y1 - y0) * ny);   // larger pitch nearer the top
+    if (cx < 0 || cy < 0 || cx >= nx || cy >= ny) continue;         // outside the plotted range
+    const k = cy * nx + cx;
+    grid[k]++; if (grid[k] > peak) peak = grid[k];
+    plotted++;
+  }
+  const X = (v) => padL + pw * (v - x0) / (x1 - x0);
+  const Y = (v) => padT + ph * (y1 - v) / (y1 - y0);
+  ctx.fillStyle = gazeCol();
+  const cw = pw / nx, chh = ph / ny;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const c = grid[j * nx + i];
+    if (!c) continue;
+    ctx.globalAlpha = Math.min(1, Math.pow(c / peak, 0.42));
+    ctx.fillRect(padL + i * cw, padT + j * chh, Math.ceil(cw) + .5, Math.ceil(chh) + .5);
+  }
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = HOT3D.css('--line'); ctx.fillStyle = HOT3D.css('--muted');
+  ctx.font = `11px ${HOT3D.css('--mono')}`; ctx.lineWidth = 1;
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (let g = 0; g <= 4; g++) {
+    const v = y0 + (y1 - y0) * g / 4;
+    ctx.fillText(`${v.toFixed(0)}°`, padL - 6, Math.round(Y(v)) + .5);
+  }
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  for (let g = 0; g <= 4; g++) {
+    const v = x0 + (x1 - x0) * g / 4;
+    ctx.fillText(`${v.toFixed(0)}°`, X(v), h - padB + 5);
+  }
+  const mx = median(xs), my = median(ys);
+  ctx.strokeStyle = HOT3D.css('--ink'); ctx.globalAlpha = .5; ctx.setLineDash([3, 3]);
+  ctx.beginPath();
+  ctx.moveTo(Math.round(X(mx)) + .5, padT); ctx.lineTo(Math.round(X(mx)) + .5, padT + ph);
+  ctx.moveTo(padL, Math.round(Y(my)) + .5); ctx.lineTo(padL + pw, Math.round(Y(my)) + .5);
+  ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+  ctx.strokeStyle = HOT3D.css('--line-2');
+  ctx.strokeRect(padL + .5, padT + .5, pw - 1, ph - 1);
+  $('capDens').textContent =
+    `Gaze direction: mean of the two yaws (horizontal) against pitch (vertical, downward gaze ` +
+    `lower), degrees, over the ${F.n(pool.finite)} frames with gaze in the ${recs.size} ` +
+    `recordings. The axes span ${x0}° to ${x1}° yaw and ${y0}° to ${y1}° pitch, which holds ` +
+    `${F.n(plotted)} of them; the rest fall outside and are not drawn. ` +
+    `Dashed lines mark the medians, ${mx.toFixed(1)}° yaw and ${my.toFixed(1)}° pitch. ` +
+    `Cell shading is the frame count in that cell, raised to the power 0.42 so the tails stay visible.`;
+});
+
+plainChart('cHist', (canvas) => {
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const w = canvas.clientWidth || 400, h = canvas.clientHeight || 300;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  if (!pool || !pool.depth.length) return;
+  const padL = 46, padR = 10, padT = 10, padB = 28;
+  const pw = w - padL - padR, ph = h - padT - padB;
+  const ds = pool.depthS;
+  const lo = Math.log10(ds[0]), hi = Math.log10(ds[ds.length - 1]);
+  const nb = 44, counts = new Float64Array(nb);
+  for (const z of pool.depth) {
+    let k = Math.floor((Math.log10(z) - lo) / Math.max(hi - lo, 1e-9) * nb);
+    if (k >= nb) k = nb - 1;
+    if (k >= 0) counts[k]++;
+  }
+  let peak = 0;
+  for (const c of counts) peak = Math.max(peak, c);
+  const X = (m) => padL + pw * (Math.log10(m) - lo) / Math.max(hi - lo, 1e-9);
+  const Y = (c) => padT + ph * (1 - c / Math.max(peak, 1));
+  ctx.strokeStyle = HOT3D.css('--line'); ctx.fillStyle = HOT3D.css('--muted');
+  ctx.font = `11px ${HOT3D.css('--mono')}`; ctx.lineWidth = 1;
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (let g = 0; g <= 4; g++) {
+    const c = peak * g / 4, yy = Math.round(Y(c)) + .5;
+    ctx.globalAlpha = .6; ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(w - padR, yy); ctx.stroke();
+    ctx.globalAlpha = 1; ctx.fillText(F.n(Math.round(c)), padL - 6, yy);
+  }
+  ctx.fillStyle = gazeCol();
+  const bw = pw / nb;
+  for (let i = 0; i < nb; i++) {
+    if (!counts[i]) continue;
+    const y = Y(counts[i]);
+    ctx.fillRect(padL + i * bw + .5, y, Math.max(bw - 1, 1), padT + ph - y);
+  }
+  ctx.fillStyle = HOT3D.css('--muted'); ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  for (const m of [0.1, 0.2, 0.5, 1, 2, 4]) {
+    if (m < ds[0] || m > ds[ds.length - 1]) continue;
+    ctx.fillText(`${m} m`, X(m), h - padB + 5);
+  }
+  const md = median(ds);
+  ctx.strokeStyle = HOT3D.css('--ink'); ctx.globalAlpha = .5; ctx.setLineDash([3, 3]);
+  ctx.beginPath();
+  ctx.moveTo(Math.round(X(md)) + .5, padT); ctx.lineTo(Math.round(X(md)) + .5, padT + ph);
+  ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+  ctx.strokeStyle = HOT3D.css('--line-2');
+  ctx.strokeRect(padL + .5, padT + .5, pw - 1, ph - 1);
+  $('capHist').textContent =
+    `Gaze depth, logarithmic bins, over all ${F.n(pool.depth.length)} frames with gaze in the ` +
+    `${recs.size} recordings. Median ${F.m(md)} (dashed), quartiles ${F.m(quant(ds, .25))} and ` +
+    `${F.m(quant(ds, .75))}. The rightmost bar is a clamp: ${F.n(pool.clipped)} frames sit at ` +
+    `exactly ${ds[ds.length - 1].toFixed(2)} m, which is the largest depth anywhere in these recordings.`;
+});
+
+/* ---------- field table ---------- */
+
+const FIELD_DEFS = [
+  ['gaze.yaw_l', '(F,)', 'rad', 'yl', 'Horizontal angle of the left eye in the Central Pupil Frame.'],
+  ['gaze.yaw_r', '(F,)', 'rad', 'yr', 'The same for the right eye. The two differ; that difference is the vergence.'],
+  ['gaze.pitch', '(F,)', 'rad', 'pi', 'Vertical angle, one value shared by both eyes.'],
+  ['gaze.depth', '(F,)', 'm', 'dp', 'Distance to the fixation point along the gaze direction.'],
+];
+
+function fieldRow(cells, what) {
+  const tr = document.createElement('tr');
+  for (const [text, cls] of cells) tr.append(td(text, cls));
+  const last = td(what);
+  last.style.whiteSpace = 'normal';
+  tr.append(last);
+  return tr;
+}
+
+function fillFieldTable() {
+  const tb = document.querySelector('#fieldTab tbody');
+  tb.textContent = '';
+  for (const [name, shape, unit, key, what] of FIELD_DEFS) {
+    const all = [];
+    for (const r of recs.values()) for (const v of r[key]) if (isFinite(v)) all.push(v);
+    all.sort((a, b) => a - b);
+    const rng = !all.length ? 'no finite value'
+      : (unit === 'rad'
+          ? `${F.deg(quant(all, .01))} … ${F.deg(quant(all, .99))}`
+          : `${F.m(quant(all, .01))} … ${F.m(quant(all, .99))}`);
+    tb.append(fieldRow([[name, 'mono'], [shape, 'mono'], [unit, 'mono'], [rng, 'num']], what));
+  }
+  const seen = [...new Set([...recs.values()].map(r => r.source))].join(' / ') || '—';
+  tb.append(fieldRow([['gaze.source', 'mono'], ['scalar', 'mono'], ['string', 'mono'], [seen, 'num']],
+    'Which eye-tracking calibration the service used for this recording: personalized or general.'));
+  $('fieldScope').textContent = recs.size === FEATURED.length
+    ? `${FEATURED.length} featured recordings`
+    : `${recs.size} recording${recs.size === 1 ? '' : 's'} read so far`;
+}
+
+/* ---------- main ---------- */
+
+function setFigs(p) {
+  $('fRecs').textContent = `${recs.size} / ${FEATURED.length}`;
+  $('fCov').textContent = F.pct(1 - p.missing / Math.max(p.frames, 1), 2);
+  $('fRate').textContent = isFinite(p.rate) ? `${p.rate.toFixed(1)} Hz` : '—';
+  $('fDepth').textContent = p.depthS.length ? F.m(median(p.depthS)) : '—';
+  $('fPitch').textContent = p.pitchS.length ? `${median(p.pitchS).toFixed(0)}°` : '—';
+  $('fVerg').textContent = p.vergS.length ? `${median(p.vergS).toFixed(1)}°` : '—';
+}
+
+function fillVergence(p) {
+  const vs = p.vergS, ds = p.depthS;
+  if (!vs.length) { $('vergNote').textContent = 'No finite gaze in the recordings that loaded.'; return; }
+  const medV = median(vs), medD = median(ds);
+  const corrTxt = isFinite(vergCorr) ? vergCorr.toFixed(3) : 'not computable';
+  const predicted = baseline / (2 * Math.tan(medV / DEG / 2));
+  const kv = $('vergKv');
+  const add = (k, v) => {
+    const dt = document.createElement('dt'), dd = document.createElement('dd');
+    dt.textContent = k; dd.innerHTML = v; kv.append(dt, dd);
+  };
+  add('median θ', `<span class="mono">${medV.toFixed(2)}°</span> convergence, across ${F.n(vs.length)} frames`);
+  add('implied b', `<span class="mono">${F.cm(baseline)}</span> median interocular baseline, from b = 2·z·tan(θ/2)`);
+  add('θ → z', `<span class="mono">${F.m(predicted)}</span> at the median angle, against a released median depth of <span class="mono">${F.m(medD)}</span>`);
+  add('corr', `<span class="mono">${corrTxt}</span> between 1/depth and θ`);
+  $('vergNote').textContent =
+    `Left yaw is below right yaw on ${F.n(p.negVerg)} of ${F.n(p.finite)} frames with gaze ` +
+    `(${(100 * p.negVerg / Math.max(p.finite, 1)).toFixed(1)}%), so the sign of the difference is ` +
+    `a convention and its magnitude is the convergence. Depth and angle carry the same information: ` +
+    `1/depth tracks θ with a correlation of ${corrTxt}, and the baseline that relation ` +
+    `implies, ${F.cm(baseline)}, is an adult interocular distance. The ${F.n(p.clipped)} frames ` +
+    `sitting at the largest released depth, ${F.m(p.zMax)}, are a clamp rather than a measurement ` +
+    `and are left out of that fit. There the angle is at the limit of what vergence can resolve: ` +
+    `past a few metres a fraction of a degree moves the distance by metres.`;
+}
+
+async function run() {
+  const order = [FIRST, ...FEATURED.filter(s => s !== FIRST)];
+  const pick = $('pick');
+  /* setCursor(null), not `cursorIdx = null`: the readout text belongs to the old recording and
+     has to be cleared with it, or it is left standing under the new recording's charts. */
+  pick.addEventListener('change', () => { describeSelected(); setCursor(null); redrawAll(); });
+
+  let failed = 0;
+  for (let k = 0; k < order.length; k++) {
+    $('loadLine').textContent = `reading gaze from payload ${k + 1} of ${order.length} — ${order[k]}…`;
+    try {
+      const rec = await loadGaze(order[k]);
+      recs.set(rec.seq, rec);
+      addRow(rec);
+      const opt = document.createElement('option');
+      opt.value = rec.seq; opt.textContent = `${rec.seq} · ${rec.participant}`;
+      pick.append(opt);
+      if (recs.size === 1) {
+        pick.value = rec.seq;
+        describeSelected();
+        redrawAll();
+        fillFieldTable();
+        if (rec.rgb) {
+          $('rgbModel').textContent = String(rec.rgb.projectionModelType).replace('CameraModelType.', '');
+          $('rgbSize').textContent = `${rec.rgb.imageWidth}×${rec.rgb.imageHeight}`;
+          $('rgbParams').textContent = String(rec.rgb.projectionParams.length);
+        }
+      }
+    } catch (e) {
+      failed++;
+      $('loadLine').innerHTML = `<span class="err">could not read ${order[k]}: ${e.message}</span>`;
+    }
+  }
+  if (!recs.size) {
+    $('loadLine').innerHTML = '<span class="err">No payload could be read; every figure on this page comes from data/seq/*.json.</span>';
+    $('distIntro').innerHTML = '<span class="err">No data to summarise.</span>';
+    $('calLine').innerHTML = '<span class="err">No calibration source could be read.</span>';
+    return;
+  }
+  /* The first payload read is the one selected by default, so the table and the picker are in
+     fetch order until they are put back into sequence order here (append moves existing nodes). */
+  const keep = pick.value;
+  for (const seq of FEATURED) {
+    const r = recs.get(seq);
+    if (!r) continue;
+    $('seqBody').append(r.tr);
+    const opt = [...pick.options].find(o => o.value === seq);
+    if (opt) pick.append(opt);
+  }
+  pick.value = keep;                       // reordering options can drop the selection
+
+  fillFieldTable();
+  pool = buildPool();
+  setFigs(pool);
+  fillVergence(pool);
+
+  const srcs = new Map();
+  for (const r of recs.values()) srcs.set(r.source, (srcs.get(r.source) || 0) + 1);
+  const srcTxt = [...srcs.entries()].map(([k, v]) => `${v} ${k}`).join(', ');
+  let ariaLine = '';
+  try {
+    const ix = await HOT3D.index();
+    const aria = ix.sequences.filter(r => r.device === 'Aria');
+    const withGaze = aria.filter(r => r.has.eye_gaze).length;
+    ariaLine = ` Across the whole Aria set, ${F.n(withGaze)} of ${F.n(aria.length)} recordings list an ` +
+      `eye-gaze file in the index, which records only that the file exists, not which calibration produced it.`;
+  } catch (e) { /* the per-recording table below is the primary statement */ }
+  $('calLine').className = 'note';
+  $('calLine').textContent =
+    `Of the ${recs.size} featured recordings read here: ${srcTxt}. A personalized calibration means ` +
+    `the wearer ran the eye-calibration routine before recording; the general model is the fallback ` +
+    `when they did not.` + ariaLine;
+
+  $('loadLine').className = 'note';
+  $('loadLine').textContent = failed
+    ? `${recs.size} of ${FEATURED.length} payloads read; ${failed} failed. Figures below cover the ones that loaded.`
+    : `All ${FEATURED.length} payloads read: ${F.n(pool.frames)} frames, ` +
+      `${F.n(pool.missing)} of them without gaze (${F.pct(pool.missing / pool.frames, 2)}).`;
+  $('distIntro').className = '';
+  $('distIntro').textContent =
+    `Both panels pool every frame with gaze in the ${recs.size} recordings read: ` +
+    `${F.n(pool.finite)} frames, ${(pool.duration / 60).toFixed(1)} minutes of recording from ` +
+    `${new Set([...recs.values()].map(r => r.participant)).size} participants. ` +
+    `Medians are marked on each.`;
+  redrawAll();
+}
+
+/* redraw on theme change, on resize, and after fonts settle */
+new MutationObserver(redrawAll).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', redrawAll); } catch (e) { /* older Safari */ }
+let rt = 0;
+addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(redrawAll, 120); });
+/* axis labels are measured in the mono webfont; redraw once it has actually loaded */
+try { document.fonts.ready.then(redrawAll); } catch (e) { /* no Font Loading API */ }
+
+run().catch(e => {
+  $('loadLine').className = '';
+  $('loadLine').innerHTML = `<span class="err">Gaze data could not be read: ${e.message}</span>`;
+});
+</script>
+</body>
+</html>

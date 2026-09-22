@@ -1,0 +1,750 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sequence viewer · HOT3D Aria</title>
+<meta name="description" content="Play a HOT3D Aria recording with its released annotations drawn on the video: object and hand boxes, per-frame quality masks, headset motion, gaze and distances.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+<style>
+  .bar { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 12px; }
+  .bar select { min-width: 260px; max-width: 100%; }
+  .pills { display: flex; gap: 6px; flex-wrap: wrap; }
+  .viewer { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr) 340px; align-items: start; }
+  .stage {
+    position: relative; aspect-ratio: 1 / 1; overflow: hidden;
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius);
+  }
+  .stage video { display: block; width: 100%; height: 100%; }
+  .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .transport { display: flex; gap: 10px; align-items: center; margin: 10px 0; }
+  .transport input[type="range"] { flex: 1 1 120px; min-width: 80px; }
+  .transport .btn { min-width: 74px; }
+  .readout { padding: 14px 16px; }
+  .readout h3 {
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); margin: 16px 0 6px; font-weight: 500;
+  }
+  .readout h3:first-child { margin-top: 0; }
+  .kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; font-size: 13px; }
+  .kv .k { color: var(--ink-2); }
+  .kv .v { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+  .rtab { font-size: 12.5px; }
+  .rtab th, .rtab td { padding: 4px 6px; }
+  .rtab th {
+    position: static; background: none; color: var(--muted); text-transform: none;
+    letter-spacing: 0; font-size: 11.5px; font-weight: 500; cursor: default;
+  }
+  .rtab td { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .rtab td.name { font-family: var(--sans); }
+  .sw { width: 9px; height: 9px; border-radius: 2px; display: inline-block; margin-right: 6px; vertical-align: baseline; }
+  .st-ok { color: var(--ok); } .st-no { color: var(--bad); } .st-na { color: var(--muted); }
+  .chart { width: 100%; height: 148px; cursor: crosshair; }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+  .legend .item { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
+  .legend .item.off { opacity: .35; }
+  .toggle svg, .legend svg { display: block; }
+  @media (max-width: 900px) { .viewer { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 420px) { .bar select { min-width: 0; width: 100%; } }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div class="page-head">
+    <p class="eyebrow">Sequence viewer</p>
+    <h1>The recording, with its ground truth drawn on it</h1>
+    <p class="lede">One Aria recording at a time: the RGB stream, the released 2D boxes for every
+    object and both hands, and a readout of everything the release states about the frame you are
+    looking at — headset motion, distances, gaze and the per-frame quality masks. Nothing here is
+    re-estimated; every number is decoded from the recording's annotation files.</p>
+  </div>
+
+  <div class="bar">
+    <label class="field" for="seqSel">Recording
+      <select id="seqSel" disabled><option>loading…</option></select>
+    </label>
+    <div class="pills" id="pills"></div>
+  </div>
+  <p class="loading" id="status">Loading recording index…</p>
+
+  <div class="viewer">
+    <div>
+      <figure>
+        <div class="stage" id="stage">
+          <video id="vid" playsinline muted preload="auto"></video>
+          <canvas id="ov"></canvas>
+        </div>
+        <figcaption id="cap">The RGB stream, re-encoded to 704&times;704 from the released
+        1408&times;1408 frames. Overlay boxes come from the release already rotated into the upright
+        display frame, so they are scaled only by canvas width &divide; 1408.</figcaption>
+      </figure>
+
+      <div class="transport">
+        <button class="btn" type="button" id="playBtn" disabled>Play</button>
+        <input type="range" id="scrub" min="0" max="0" value="0" step="1" disabled aria-label="Frame">
+        <span class="mono" id="tRead">0:00.00</span>
+      </div>
+
+      <div class="toggles" style="margin-bottom:8px">
+        <label class="toggle"><input type="checkbox" id="tObj" checked><span class="swatch" style="background:var(--c-object)"></span>Object boxes</label>
+        <label class="toggle"><input type="checkbox" id="tHand" checked><span class="swatch" style="background:var(--c-hand)"></span>Hand boxes</label>
+        <label class="toggle"><input type="checkbox" id="tQa" checked>QA badge</label>
+      </div>
+      <div class="toggles" id="objToggles"></div>
+    </div>
+
+    <aside class="card readout" id="readout">
+      <p class="note" style="margin:0">Per-frame readout appears once a recording is loaded.</p>
+    </aside>
+  </div>
+
+  <h2>Timeline</h2>
+  <figure>
+    <canvas class="chart" id="chSpeed"></canvas>
+    <figcaption id="capSpeed">Headset speed in m/s, from a central difference of the motion-capture
+    headset track. Click to seek.</figcaption>
+  </figure>
+  <figure style="margin-top:18px">
+    <canvas class="chart" id="chDist"></canvas>
+    <div class="legend" id="distLegend"></div>
+    <figcaption id="capDist">Distance in metres from the headset origin to each object's model
+    origin, for the objects ticked above. Gaps are frames with no released pose. Click to seek.</figcaption>
+  </figure>
+
+  <h2>How this page draws</h2>
+  <p>The frame index is <span class="mono">round(video.currentTime &times; fps)</span> clamped to
+  <span class="mono">F&minus;1</span>, with the payload's own <span class="mono">fps</span>; row
+  <span class="mono">i</span> of every array is frame <span class="mono">i</span> of the mp4. Boxes
+  are released 2D boxes, stored with <span class="mono">box_frame = "display"</span>, and a box may
+  extend past the image edge or sit entirely outside it — the frame is fisheye and the released box
+  is not clipped to it. Objects that leave the view, or that the annotation does not cover, appear
+  as gaps rather than interpolated values.</p>
+  <p class="note">Two signals are deliberately not drawn on the video. Eye gaze is given in the
+  Central Pupil Frame as yaw, pitch and depth and is not projected into the image by this release,
+  so it is reported as numbers only. Hand annotations carry a wrist pose plus joint angles
+  (UmeTrack 22, MANO 15 coefficients); the payload does not expand them into 3D fingertip
+  landmarks, so only wrists, boxes and availability are shown. MANO ships no per-frame confidence
+  value, which is why that field reads as not provided.</p>
+</main>
+
+<script>
+HOT3D.init();
+
+const FEATURED = ['P0001_4bf4e21a', 'P0002_65085bfc', 'P0003_ebdc6ff7', 'P0009_e71e2f24',
+  'P0010_573b2de6', 'P0010_8ff3e5c4', 'P0011_2255f410', 'P0011_72efb935', 'P0012_130a66e1',
+  'P0014_1fdca00e', 'P0015_cc5dfd13', 'P0015_e7458eb3'];
+const DEFAULT_SEQ = 'P0003_ebdc6ff7';
+const MASK_LABEL = {
+  qa_pass: 'QA pass', good_exposure: 'Good exposure', hand_visible: 'Hand visible',
+  object_visible: 'Object visible', hand_pose_available: 'Hand pose available',
+  headset_pose_available: 'Headset pose available', object_pose_available: 'Object pose available',
+};
+const DASHES = [[], [6, 3], [1, 3], [9, 4], [2, 2], [11, 3, 2, 3], [4, 2, 1, 2], [7, 7], [3, 6], [13, 4]];
+
+const $ = (id) => document.getElementById(id);
+const sel = $('seqSel'), statusEl = $('status'), pills = $('pills');
+const stage = $('stage'), vid = $('vid'), ov = $('ov'), octx = ov.getContext('2d');
+const playBtn = $('playBtn'), scrub = $('scrub'), tRead = $('tRead');
+const tObj = $('tObj'), tHand = $('tHand'), tQa = $('tQa');
+const objToggles = $('objToggles'), readout = $('readout'), legend = $('distLegend');
+const chSpeed = $('chSpeed'), chDist = $('chDist');
+const CAP0 = { cap: $('cap').innerHTML, capSpeed: $('capSpeed').innerHTML, capDist: $('capDist').innerHTML };
+
+let S = null;              // decoded state for the current recording
+let cur = 0, cw = 0, ch = 0, playing = false, raf = 0, loadToken = 0;
+let PAL = {}, R = {};      // palette, readout element refs
+let geomS = null, geomD = null, capS = null, capD = null;
+
+/* ---------- colour ---------- */
+
+function hexToHsl(hex) {
+  let h = (hex || '').trim().replace('#', '');
+  if (h.length === 3) h = h.split('').map(c => c + c).join('');
+  if (!/^[0-9a-f]{6}$/i.test(h)) return null;
+  const n = parseInt(h, 16);
+  const r = (n >> 16 & 255) / 255, g = (n >> 8 & 255) / 255, b = (n & 255) / 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2;
+  let hu = 0, s = 0;
+  if (mx !== mn) {
+    const d = mx - mn;
+    s = d / (1 - Math.abs(2 * l - 1));
+    if (mx === r) hu = ((g - b) / d + (g < b ? 6 : 0));
+    else if (mx === g) hu = (b - r) / d + 2;
+    else hu = (r - g) / d + 4;
+    hu *= 60;
+  }
+  return [hu, s * 100, l * 100];
+}
+
+/** 0…n-1 reordered so neighbouring objects sit far apart on the lightness ramp */
+function shadeOrder(n) {
+  const out = [], seen = new Set();
+  for (let step = n; ; step = Math.ceil(step / 2)) {
+    for (let i = 0; i < n; i += step) if (!seen.has(i)) { seen.add(i); out.push(i); }
+    if (step === 1) break;
+  }
+  return out;
+}
+
+/**
+ * k-th of n shades of the object channel colour: one hue, one distinct lightness per object.
+ * The band is anchored on the theme's own --c-object (light ≈ 50% L, dark ≈ 71% L) and clamped
+ * to a readable range, so every object stays separable in both themes — a fixed ±offset table
+ * collapses several objects onto the clamp in whichever theme sits near the edge.
+ */
+function objShade(k, n) {
+  const hsl = hexToHsl(PAL.object);
+  const total = Math.max(n || 1, 1);
+  if (!hsl || total < 2) return PAL.object;
+  const lo = Math.max(34, hsl[2] - 24), hi = Math.min(82, hsl[2] + 24);
+  const l = lo + (hi - lo) * shadeOrder(total)[k % total] / (total - 1);
+  return `hsl(${hsl[0].toFixed(0)} ${hsl[1].toFixed(0)}% ${l.toFixed(1)}%)`;
+}
+
+function refreshPalette() {
+  PAL = {
+    object: HOT3D.channel.object(), hand: HOT3D.channel.hand(),
+    headset: HOT3D.channel.headset(), muted: HOT3D.css('--muted'),
+    surface: HOT3D.css('--surface'), ok: HOT3D.css('--ok'), bad: HOT3D.css('--bad'),
+    mono: HOT3D.css('--mono') || 'monospace',
+  };
+  if (S) S.objects.forEach((o, k) => {
+    o.color = objShade(k, S.objects.length);
+    if (o.sw) o.sw.style.background = o.color;
+    if (o.line) styleLine(o.line, o);
+    if (o.legLine) styleLine(o.legLine, o);
+  });
+}
+
+/* ---------- decoding ---------- */
+
+function speedOf(T, t) {
+  const F = T.length, sp = new Float32Array(F);
+  for (let i = 0; i < F; i++) {
+    const a = Math.max(0, i - 1), b = Math.min(F - 1, i + 1), dt = t[b] - t[a];
+    if (b === a || !(dt > 0) || !isFinite(T[a][0]) || !isFinite(T[b][0])) { sp[i] = NaN; continue; }
+    sp[i] = HOT3D.dist(T[a], T[b]) / dt;
+  }
+  return sp;
+}
+
+function decode(d) {
+  const F = d.F, t = HOT3D.f32(d.t), hT = HOT3D.f32(d.headset.T, 3);
+  const st = {
+    seq: d.seq, F, fps: d.fps, t, hT, speed: speedOf(hT, t),
+    dw: d.display_wh.rgb, duration: d.duration_s, participant: d.participant,
+    have_gt: d.have_gt, gazeSrc: d.gaze.source, summary: d.summary,
+    gaze: {
+      yaw_l: HOT3D.f32(d.gaze.yaw_l), yaw_r: HOT3D.f32(d.gaze.yaw_r),
+      pitch: HOT3D.f32(d.gaze.pitch), depth: HOT3D.f32(d.gaze.depth),
+    },
+    masks: {}, objects: [], hands: {},
+  };
+  for (const key of Object.keys(d.masks)) st.masks[key] = HOT3D.u8(d.masks[key].rgb);
+  d.objects.forEach((o, k) => {
+    const T = HOT3D.f32(o.T, 3), dist = new Float32Array(F);
+    for (let i = 0; i < F; i++) {
+      dist[i] = (isFinite(T[i][0]) && isFinite(hT[i][0])) ? HOT3D.dist(hT[i], T[i]) : NaN;
+    }
+    st.objects.push({
+      uid: o.uid, name: o.name, T, dist, on: true,
+      color: objShade(k, d.objects.length), dash: DASHES[k % DASHES.length],
+      box: HOT3D.f32(o.boxes.rgb.xyxy, 4), vis: HOT3D.f32(o.boxes.rgb.vis),
+      framesSeen: o.boxes.rgb.frames_seen, framesPose: o.frames_with_pose,
+    });
+  });
+  for (const side of ['left', 'right']) {
+    const h = d.hands[side];
+    st.hands[side] = {
+      side,
+      ume: { t: HOT3D.f32(h.umetrack.wrist_t, 3), conf: HOT3D.f32(h.umetrack.conf) },
+      mano: { t: HOT3D.f32(h.mano.wrist_t, 3), conf: HOT3D.f32(h.mano.conf) },
+      box: HOT3D.f32(h.boxes.rgb.xyxy, 4), vis: HOT3D.f32(h.boxes.rgb.vis),
+    };
+  }
+  return st;
+}
+
+/* ---------- readout ---------- */
+
+const vec = (p) => (p && isFinite(p[0]) ? `${p[0].toFixed(2)} ${p[1].toFixed(2)} ${p[2].toFixed(2)}` : '—');
+const num = (v, d, u) => (isFinite(v) ? v.toFixed(d) + (u || '') : '—');
+
+function maskState(v) {
+  if (v === 1) return ['yes', 'st-ok'];
+  if (v === 0) return ['no', 'st-no'];
+  if (v === 255) return ['not annotated', 'st-na'];
+  return ['—', 'st-na'];
+}
+
+function boxState(box, vis, i, W, H) {
+  const b = box[i];
+  if (!isFinite(b[0])) return ['—', 'st-na'];
+  if (b[2] <= 0 || b[3] <= 0 || b[0] >= W || b[1] >= H) return ['off-frame', 'st-na'];
+  // one decimal: at 0 dp a released 0.997 reads as "100%", i.e. fully visible, which it is not
+  return [isFinite(vis[i]) ? HOT3D.fmt.pct(vis[i]) : 'yes', ''];
+}
+
+function buildReadout() {
+  const maskKeys = Object.keys(S.masks);
+  readout.innerHTML =
+    `<h3>Frame</h3>
+     <div class="kv">
+       <span class="k">time</span><span class="v" data-r="time">—</span>
+       <span class="k">frame</span><span class="v" data-r="frame">—</span>
+     </div>
+     <h3>Headset — motion capture</h3>
+     <div class="kv">
+       <span class="k">position x y z (m)</span><span class="v" data-r="hpos">—</span>
+       <span class="k">speed</span><span class="v" data-r="hspd">—</span>
+     </div>
+     <h3>Objects — range from headset</h3>
+     <div class="table-wrap" style="border:none;background:none">
+       <table class="rtab"><thead><tr>
+         <th>object</th><th class="num">dist m</th><th>pose</th><th>box vis</th>
+       </tr></thead><tbody id="objRows"></tbody></table>
+     </div>
+     <h3>Hands — wrist</h3>
+     <div class="kv" id="handKv"></div>
+     <h3>Eye gaze — ${S.gazeSrc} calibration, CPF</h3>
+     <div class="kv">
+       <span class="k">yaw left</span><span class="v" data-r="gyl">—</span>
+       <span class="k">yaw right</span><span class="v" data-r="gyr">—</span>
+       <span class="k">pitch</span><span class="v" data-r="gp">—</span>
+       <span class="k">depth</span><span class="v" data-r="gd">—</span>
+     </div>
+     <h3>Masks — RGB stream</h3>
+     <div class="kv" id="maskKv"></div>`;
+
+  R = {};
+  readout.querySelectorAll('[data-r]').forEach(el => { R[el.dataset.r] = el; });
+
+  const tb = readout.querySelector('#objRows');
+  S.objects.forEach(o => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="name"><span class="sw"></span><span></span></td>
+                    <td class="num"></td><td></td><td></td>`;
+    tb.append(tr);
+    o.sw = tr.querySelector('.sw');
+    o.sw.style.background = o.color;
+    tr.querySelector('.name span:last-child').textContent = o.name;
+    o.cells = { dist: tr.children[1], pose: tr.children[2], box: tr.children[3] };
+  });
+
+  const hk = readout.querySelector('#handKv');
+  for (const side of ['left', 'right']) {
+    for (const [key, label] of [['w', 'wrist x y z (m)'], ['c', 'UmeTrack conf'],
+                                ['b', 'box in RGB'], ['m', 'MANO wrist']]) {
+      hk.insertAdjacentHTML('beforeend',
+        `<span class="k">${side} &middot; ${label}</span><span class="v" data-r="h_${side}_${key}">—</span>`);
+    }
+  }
+  const mk = readout.querySelector('#maskKv');
+  for (const key of maskKeys) {
+    mk.insertAdjacentHTML('beforeend',
+      `<span class="k">${MASK_LABEL[key] || key}</span><span class="v" data-r="m_${key}">—</span>`);
+  }
+  readout.querySelectorAll('[data-r]').forEach(el => { R[el.dataset.r] = el; });
+}
+
+function updateReadout(i) {
+  const W = S.dw[0], H = S.dw[1];
+  R.time.textContent = `${HOT3D.fmt.clock(S.t[i])} (${S.t[i].toFixed(2)} s)`;
+  R.frame.textContent = `${i} / ${S.F - 1}`;
+  R.hpos.textContent = vec(S.hT[i]);
+  R.hspd.textContent = num(S.speed[i], 3, ' m/s');
+
+  for (const o of S.objects) {
+    o.cells.dist.textContent = isFinite(o.dist[i]) ? o.dist[i].toFixed(2) : '—';
+    const pose = isFinite(o.T[i][0]);
+    o.cells.pose.textContent = pose ? 'yes' : 'no';
+    o.cells.pose.className = pose ? 'st-ok' : 'st-no';
+    const [bt, bc] = boxState(o.box, o.vis, i, W, H);
+    o.cells.box.textContent = bt;
+    o.cells.box.className = bc;
+  }
+
+  for (const side of ['left', 'right']) {
+    const h = S.hands[side];
+    R[`h_${side}_w`].textContent = vec(h.ume.t[i]);
+    R[`h_${side}_c`].textContent = isFinite(h.ume.conf[i]) ? h.ume.conf[i].toFixed(2) : 'not provided';
+    const [bt, bc] = boxState(h.box, h.vis, i, W, H);
+    R[`h_${side}_b`].textContent = bt;
+    R[`h_${side}_b`].className = 'v ' + bc;
+    R[`h_${side}_m`].textContent = isFinite(h.mano.t[i][0])
+      ? `${vec(h.mano.t[i])} · conf ${isFinite(h.mano.conf[i]) ? h.mano.conf[i].toFixed(2) : 'n/a'}`
+      : '—';
+  }
+
+  R.gyl.textContent = HOT3D.fmt.deg(S.gaze.yaw_l[i]);
+  R.gyr.textContent = HOT3D.fmt.deg(S.gaze.yaw_r[i]);
+  R.gp.textContent = HOT3D.fmt.deg(S.gaze.pitch[i]);
+  R.gd.textContent = HOT3D.fmt.m(S.gaze.depth[i]);
+
+  for (const key of Object.keys(S.masks)) {
+    const [txt, cls] = maskState(S.masks[key][i]);
+    const el = R[`m_${key}`];
+    el.textContent = txt;
+    el.className = 'v ' + cls;
+  }
+}
+
+/* ---------- overlay ---------- */
+
+function fitCanvas() {
+  const r = vid.getBoundingClientRect();
+  cw = r.width; ch = r.height;
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  ov.width = Math.max(1, Math.round(cw * dpr));
+  ov.height = Math.max(1, Math.round(ch * dpr));
+  octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+let placed = [];   // label rectangles already drawn on this frame
+const hits = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+function chip(x, y, text, color) {
+  octx.font = `500 11px ${PAL.mono}`;
+  const w = octx.measureText(text).width + 9, h = 16;
+  const xx = Math.max(1, Math.min(x, cw - w - 1));
+  let yy = Math.max(1, Math.min(y, ch - h - 1));
+  for (let n = 0; n < 8; n++) {                       // nudge down off any label already drawn
+    const r = { x: xx, y: yy, w, h };
+    if (!placed.some(p => hits(r, p))) break;
+    yy = Math.min(yy + h + 2, ch - h - 1);
+  }
+  placed.push({ x: xx, y: yy, w, h });
+  octx.globalAlpha = .9; octx.fillStyle = PAL.surface;
+  octx.fillRect(xx, yy, w, h);
+  octx.globalAlpha = 1;
+  octx.strokeStyle = color; octx.lineWidth = 1;
+  octx.strokeRect(xx + .5, yy + .5, w - 1, h - 1);
+  octx.fillStyle = color; octx.textBaseline = 'middle'; octx.textAlign = 'left';
+  octx.fillText(text, xx + 4.5, yy + h / 2 + .5);
+}
+
+function drawBox(b, s, color, label) {
+  const x = b[0] * s, y = b[1] * s, w = (b[2] - b[0]) * s, hgt = (b[3] - b[1]) * s;
+  if (x + w <= 0 || y + hgt <= 0 || x >= cw || y >= ch) return false;   // released box is off-frame
+  octx.strokeStyle = color; octx.lineWidth = 2; octx.setLineDash([]);
+  octx.strokeRect(x, y, w, hgt);
+  if (label) chip(x, y - 18, label, color);
+  return true;
+}
+
+function drawOverlay(i) {
+  if (!S || !cw) return;
+  octx.clearRect(0, 0, cw, ch);
+  const s = cw / S.dw[0];
+  placed = [];
+
+  if (tQa.checked) {                                  // drawn first so it keeps the corner
+    const q = S.masks.qa_pass ? S.masks.qa_pass[i] : undefined;
+    const txt = q === 1 ? 'QA pass' : q === 0 ? 'QA fail' : q === 255 ? 'QA not annotated' : 'QA —';
+    const color = q === 1 ? PAL.ok : q === 0 ? PAL.bad : PAL.muted;
+    chip(8, 8, txt, color);
+  }
+  if (tObj.checked) {
+    for (const o of S.objects) {
+      if (!o.on) continue;
+      const b = o.box[i];
+      if (!isFinite(b[0])) continue;
+      const v = o.vis[i];
+      drawBox(b, s, o.color, isFinite(v) ? `${o.name} ${HOT3D.fmt.pct(v)}` : o.name);
+    }
+  }
+  if (tHand.checked) {
+    for (const side of ['left', 'right']) {
+      const h = S.hands[side], b = h.box[i];
+      if (!isFinite(b[0])) continue;
+      const v = h.vis[i];
+      drawBox(b, s, PAL.hand, isFinite(v) ? `${side} ${HOT3D.fmt.pct(v)}` : side);
+    }
+  }
+}
+
+/* ---------- charts ---------- */
+
+/** copy a chart into its own reused backing canvas (renderCharts runs on every resize frame,
+ *  so allocating a fresh canvas here would hand the compositor a new buffer 60 times a second) */
+function snap(cv, off) {
+  off = off || document.createElement('canvas');
+  if (off.width !== cv.width || off.height !== cv.height) { off.width = cv.width; off.height = cv.height; }
+  const c = off.getContext('2d');
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.clearRect(0, 0, off.width, off.height);
+  c.drawImage(cv, 0, 0);
+  return off;
+}
+function clearChart(cv) {
+  const c = cv.getContext('2d');
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.clearRect(0, 0, cv.width, cv.height);
+}
+function restore(cv, off) {
+  if (!off) return;
+  const c = cv.getContext('2d');
+  c.save(); c.setTransform(1, 0, 0, 1, 0, 0);
+  c.clearRect(0, 0, cv.width, cv.height);
+  c.drawImage(off, 0, 0); c.restore();
+}
+
+function renderCharts() {
+  if (!S) return;
+  geomS = HOT3D.linePlot(chSpeed, S.t,
+    [{ v: S.speed, color: PAL.headset, width: 1.3 }], { fmt: v => v.toFixed(2) });
+  capS = snap(chSpeed, capS);
+  const series = S.objects.filter(o => o.on)
+    .map(o => ({ v: o.dist, color: o.color, dash: o.dash, width: 1.3 }));
+  geomD = HOT3D.linePlot(chDist, S.t, series, { fmt: v => v.toFixed(2) });
+  capD = snap(chDist, capD);
+  drawPlayheads(cur);
+}
+
+function drawPlayheads(i) {
+  if (geomS) { restore(chSpeed, capS); HOT3D.playhead(chSpeed, geomS, S.t, i); }
+  if (geomD) { restore(chDist, capD); HOT3D.playhead(chDist, geomD, S.t, i); }
+}
+
+function seekFromChart(ev, cv, geom) {
+  if (!S || !geom) return;
+  const r = cv.getBoundingClientRect();
+  const span = geom.w - geom.padL - geom.padR;
+  const frac = Math.max(0, Math.min(1, (ev.clientX - r.left - geom.padL) / Math.max(span, 1)));
+  const tt = S.t[0] + frac * (S.t[S.F - 1] - S.t[0]);
+  seekFrame(Math.round(tt * S.fps));
+}
+chSpeed.addEventListener('click', e => seekFromChart(e, chSpeed, geomS));
+chDist.addEventListener('click', e => seekFromChart(e, chDist, geomD));
+
+/* ---------- transport ---------- */
+
+const clampF = (i) => Math.max(0, Math.min(S ? S.F - 1 : 0, i));
+const frameFromVideo = () => (S ? clampF(Math.round(vid.currentTime * S.fps)) : 0);
+
+function update(i) {
+  if (!S) return;
+  cur = clampF(i);
+  scrub.value = String(cur);
+  tRead.textContent = `${HOT3D.fmt.clock(S.t[cur])} · f${cur}`;
+  updateReadout(cur);
+  drawOverlay(cur);
+  drawPlayheads(cur);
+}
+
+function seekFrame(i) {
+  if (!S) return;
+  const f = clampF(i);
+  // land a quarter of a frame inside frame f, so reading the time back gives f again
+  try { vid.currentTime = (f + 0.25) / S.fps; } catch (e) { /* not seekable yet */ }
+  update(f);
+}
+
+function tick() {
+  if (!playing || !S) return;
+  update(frameFromVideo());
+  raf = requestAnimationFrame(tick);
+}
+
+function warn(text) { statusEl.hidden = false; statusEl.className = 'warn-box'; statusEl.textContent = text; }
+
+playBtn.addEventListener('click', () => {
+  if (!S) return;
+  if (vid.paused) vid.play().catch(() => warn('The browser refused to play this video.'));
+  else vid.pause();
+});
+vid.addEventListener('error', () => {                 // the payload loaded but the mp4 did not
+  if (!S || !vid.getAttribute('src')) return;         // ignore the src we clear on a failed load
+  warn(`The payload for ${S.seq} loaded, but the browser could not play media/${S.seq}_rgb.mp4. ` +
+       `Every number on this page still comes from data/seq/${S.seq}.json; only the picture is missing.`);
+});
+vid.addEventListener('play', () => { playing = true; playBtn.textContent = 'Pause'; cancelAnimationFrame(raf); raf = requestAnimationFrame(tick); });
+vid.addEventListener('pause', () => { playing = false; playBtn.textContent = 'Play'; cancelAnimationFrame(raf); update(frameFromVideo()); });
+vid.addEventListener('ended', () => { playing = false; playBtn.textContent = 'Play'; });
+vid.addEventListener('seeked', () => { if (!playing) update(frameFromVideo()); });
+vid.addEventListener('loadeddata', () => { fitCanvas(); update(cur); });
+vid.addEventListener('loadedmetadata', fitCanvas);
+scrub.addEventListener('input', () => seekFrame(Number(scrub.value)));
+
+/* ---------- loading ---------- */
+
+function setPills() {
+  const qa = S.masks.qa_pass;
+  let pass = 0, ann = 0;   // 255 is "not annotated": it is neither a pass nor a fail, so it is
+  if (qa) for (let i = 0; i < qa.length; i++) {   // left out of the denominator as well
+    if (qa[i] === 255) continue;
+    ann++; if (qa[i] === 1) pass++;
+  }
+  const items = [
+    `${S.participant}`,
+    `${HOT3D.fmt.n(S.F)} frames`,
+    `${S.duration.toFixed(1)} s`,
+    `${S.fps.toFixed(0)} fps`,
+    `${S.objects.length} objects`,
+    `QA pass ${ann ? HOT3D.fmt.pct(pass / ann) : 'not annotated'}`,
+    `gaze: ${S.gazeSrc}`,
+    S.have_gt ? 'ground truth released' : 'no released ground truth',
+  ];
+  pills.innerHTML = items.map(x => `<span class="pill">${x}</span>`).join('');
+}
+
+const SVG_LINE =
+  `<svg width="22" height="8" viewBox="0 0 22 8" aria-hidden="true">
+     <line x1="1" y1="4" x2="21" y2="4" stroke-width="2" stroke-linecap="round"></line>
+   </svg>`;
+
+function styleLine(line, o) {
+  line.setAttribute('stroke', o.color);
+  if (o.dash.length) line.setAttribute('stroke-dasharray', o.dash.join(' '));
+  else line.removeAttribute('stroke-dasharray');
+}
+
+/** one control per object: it governs the box on the video and the line in the distance chart */
+function buildObjToggles() {
+  objToggles.innerHTML = '';
+  legend.innerHTML = '';
+  S.objects.forEach(o => {
+    const lab = document.createElement('label');
+    lab.className = 'toggle';
+    lab.title = `pose in ${o.framesPose} frames, box in ${o.framesSeen} frames of ${S.F}`;
+    lab.innerHTML = `<input type="checkbox" checked>${SVG_LINE}<span></span>`;
+    o.line = lab.querySelector('line');
+    styleLine(o.line, o);
+    lab.querySelector('span').textContent = o.name;
+    lab.querySelector('input').addEventListener('change', (e) => {
+      o.on = e.target.checked;
+      syncLegend();
+      renderCharts();
+      drawOverlay(cur);
+    });
+    objToggles.append(lab);
+
+    const item = document.createElement('span');
+    item.className = 'item';
+    item.innerHTML = `${SVG_LINE}<span></span>`;
+    o.legLine = item.querySelector('line');
+    styleLine(o.legLine, o);
+    item.querySelector('span').textContent = o.name;
+    o.legItem = item;
+    legend.append(item);
+  });
+  syncLegend();
+}
+
+function syncLegend() {
+  for (const o of S.objects) if (o.legItem) o.legItem.classList.toggle('off', !o.on);
+}
+
+/** everything a failed load has to undo, so the page never shows one recording's numbers
+ *  over another one's video, and the transport cannot be driven with no payload behind it */
+function clearViewer() {
+  S = null; R = {}; cur = 0;
+  playing = false; cancelAnimationFrame(raf);
+  try { vid.pause(); } catch (e) { /* nothing loaded yet */ }
+  vid.removeAttribute('src'); vid.removeAttribute('poster'); vid.load();
+  playBtn.disabled = true; playBtn.textContent = 'Play';
+  scrub.disabled = true; scrub.max = '0'; scrub.value = '0';
+  tRead.textContent = '0:00.00';
+  pills.innerHTML = ''; objToggles.innerHTML = ''; legend.innerHTML = '';
+  readout.innerHTML = '<p class="note" style="margin:0">Per-frame readout appears once a recording is loaded.</p>';
+  for (const k of Object.keys(CAP0)) $(k).innerHTML = CAP0[k];
+  geomS = geomD = null;
+  clearChart(chSpeed); clearChart(chDist);
+  if (cw) octx.clearRect(0, 0, cw, ch);
+}
+
+async function load(seq) {
+  const token = ++loadToken;
+  statusEl.hidden = false;
+  statusEl.className = 'loading';
+  statusEl.textContent = `Loading ${seq} …`;
+  try {
+    const d = await HOT3D.sequence(seq);
+    if (token !== loadToken) return;    // a different recording was picked while this one loaded
+    S = decode(d);
+    cur = 0; geomS = geomD = null;
+    refreshPalette();
+    setPills();
+    buildObjToggles();
+    buildReadout();
+    scrub.max = String(S.F - 1);
+    scrub.value = '0';
+    scrub.disabled = false; playBtn.disabled = false;
+    vid.pause();
+    vid.poster = `media/${seq}_poster.jpg`;
+    vid.src = `media/${seq}_rgb.mp4`;
+    vid.load();
+    try { vid.currentTime = 0; } catch (e) { /* set again on loadeddata */ }
+    $('cap').innerHTML =
+      `<strong class="mono">${seq}</strong> — RGB stream, re-encoded to 704&times;704 from the ` +
+      `released ${S.dw[0]}&times;${S.dw[1]} frames. Boxes are the release's own 2D boxes, already ` +
+      `rotated into the upright display frame, scaled here by canvas width &divide; ${S.dw[0]}.`;
+    $('capSpeed').innerHTML =
+      `Headset speed in m/s for <span class="mono">${seq}</span>, a central difference of the ` +
+      `motion-capture headset track at ${S.fps.toFixed(0)} fps. Click to seek.`;
+    $('capDist').innerHTML =
+      `Distance in metres from the headset origin to each object's model origin, ` +
+      `<span class="mono">${seq}</span>. Gaps are frames with no released object pose. Click to seek.`;
+    fitCanvas();
+    renderCharts();
+    update(0);
+    statusEl.hidden = true;
+  } catch (err) {
+    if (token !== loadToken) return;
+    clearViewer();
+    warn(`Could not load ${seq}: ${err.message}. The payload is data/seq/${seq}.json and the video is media/${seq}_rgb.mp4.`);
+  }
+}
+
+function pickSeq() {
+  const h = decodeURIComponent(location.hash.replace('#', '')).trim();
+  return FEATURED.includes(h) ? h : DEFAULT_SEQ;
+}
+
+sel.addEventListener('change', () => {
+  location.hash = sel.value;      // hashchange does the loading
+});
+addEventListener('hashchange', () => {
+  const s = pickSeq();
+  if (!S || S.seq !== s) { sel.value = s; load(s); }
+});
+
+const refit = () => { fitCanvas(); drawOverlay(cur); };
+let rafFit = 0, rafCh = 0;
+const queueFit = () => { cancelAnimationFrame(rafFit); rafFit = requestAnimationFrame(refit); };
+const queueCharts = () => { cancelAnimationFrame(rafCh); rafCh = requestAnimationFrame(renderCharts); };
+new ResizeObserver(queueFit).observe(stage);
+new ResizeObserver(queueCharts).observe(chDist);
+addEventListener('resize', () => { queueFit(); queueCharts(); });   // also covers throttled observers
+
+const themeChanged = () => { refreshPalette(); renderCharts(); drawOverlay(cur); };
+new MutationObserver(themeChanged).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', themeChanged); } catch (e) { /* older engines */ }
+
+(async function start() {
+  refreshPalette();
+  let rows = {};
+  try {
+    const ix = await HOT3D.index();
+    for (const r of ix.sequences) rows[r.seq] = r;
+  } catch (e) { /* the select still works without the metadata labels */ }
+  sel.innerHTML = FEATURED.map(s => {
+    const r = rows[s];
+    const label = r
+      ? `${s} · ${r.participant} · ${Math.round(r.duration_s)} s · ${r.objects.length} objects`
+      : s;
+    return `<option value="${s}">${label}</option>`;
+  }).join('');
+  sel.disabled = false;
+  const seq = pickSeq();
+  sel.value = seq;
+  if (location.hash.replace('#', '') !== seq) history.replaceState(null, '', `#${seq}`);
+  await load(seq);
+})();
+</script>
+</body>
+</html>

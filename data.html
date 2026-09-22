@@ -1,0 +1,733 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>About the data · HOT3D Aria</title>
+<meta name="description" content="What a HOT3D Aria recording folder contains, how large the release is, and every step between the released files and the figures on this site.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+<style>
+  td.txt { white-space: normal; min-width: 24ch; }
+  table.files td.txt { max-width: 44ch; }
+  td.path, .path { font-family: var(--mono); font-size: 12.5px; }
+  td.piece { white-space: normal; max-width: 22ch; }
+  .dl { display: grid; grid-template-columns: max-content 1fr; gap: 7px 20px; margin: 0; }
+  .dl dt { font-family: var(--mono); font-size: 12.5px; color: var(--ink-2); }
+  .dl dd { margin: 0; color: var(--ink-2); font-size: 14px; max-width: 68ch; }
+  .steps { counter-reset: step; list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
+  .steps li { position: relative; padding-left: 34px; max-width: 78ch; }
+  .steps li::before {
+    counter-increment: step; content: counter(step);
+    position: absolute; left: 0; top: 2px; width: 22px; height: 22px;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2);
+    color: var(--ink-2); font-family: var(--mono); font-size: 12px;
+    display: grid; place-items: center;
+  }
+  .bar { display: block; height: 6px; border-radius: 3px; background: var(--accent); min-width: 2px; }
+  td.barcell { width: 120px; }
+  .sub { color: var(--muted); }
+  @media (max-width: 560px) {
+    .dl { grid-template-columns: 1fr; gap: 2px 0; }
+    .dl dd { margin-bottom: 10px; }
+  }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div class="page-head">
+    <p class="eyebrow">Release · provenance · method</p>
+    <h1>What the release contains, and how this site was made from it</h1>
+    <p class="lede">HOT3D publishes one folder per recording: a VRS recording, motion-capture ground
+    truth for the headset, both hands and every object, 2D boxes, quality masks, and Aria's own
+    machine-perception output. This page lists those files, gives the sizes involved, and states
+    every step between them and the figures on the other pages, so a reader can check the numbers
+    or rebuild the site.</p>
+  </div>
+
+  <p class="loading" id="status">Reading <span class="path">data/index.json</span>, one sequence payload, the object index and one media manifest…</p>
+
+  <section class="figs" aria-label="Scope of this site">
+    <div class="fig"><div class="n" id="fAria">—</div><div class="k">Aria recordings in the release</div></div>
+    <div class="fig"><div class="n" id="fFeat">—</div><div class="k">featured here, in full</div></div>
+    <div class="fig"><div class="n" id="fFrames">—</div><div class="k">RGB frames in those</div></div>
+    <div class="fig"><div class="n" id="fMin">—</div><div class="k">minutes of footage</div></div>
+    <div class="fig"><div class="n" id="fVrs">—</div><div class="k">source VRS behind them</div></div>
+    <div class="fig"><div class="n" id="fPay">—</div><div class="k">derived payload, one recording</div></div>
+  </section>
+  <p class="note">Every figure on this page is either measured from the files this site serves, at
+  the moment you load it, or taken from the HOT3D v4.0.0 download manifest; each table says which.
+  Sizes are decimal — 1 MB is 10<sup>6</sup> bytes.</p>
+
+  <h2>One recording folder, file by file</h2>
+  <p>A recording is identified as <span class="path">P00xx_&lt;hash&gt;</span> — participant, then an
+  opaque id. The release delivers each recording as a set of downloadable pieces that unpack into
+  the layout below. Names in the last column are the pages of this site that read the file, through
+  the derived payload rather than directly.</p>
+  <div class="table-wrap">
+    <table class="files">
+      <thead>
+        <tr>
+          <th class="no-sort">File</th>
+          <th class="no-sort">Download piece</th>
+          <th class="no-sort">What it holds</th>
+          <th class="no-sort">Used by</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="path">recording.vrs</td>
+          <td class="path">main_vrs</td>
+          <td class="txt">The recording itself. Three camera streams — RGB <span class="mono">214-1</span>
+          at 1408×1408 and the monochrome SLAM pair <span class="mono">1201-1</span>,
+          <span class="mono">1201-2</span> at 640×480, all 30 fps — alongside the other device
+          streams Aria writes, with per-frame device timestamps.</td>
+          <td class="txt"><a href="sequence.html">Sequence viewer</a> (the mp4),
+          <a href="cameras.html">Cameras</a> (the SLAM stills)</td>
+        </tr>
+        <tr>
+          <td class="path">metadata.json</td>
+          <td class="path">ground_truth</td>
+          <td class="txt">The header for the recording: participant, device, release version, the
+          objects present as UIDs and BOP ids, and whether ground truth is released for it.</td>
+          <td class="txt"><a href="recordings.html">Recordings</a>, <a href="index.html">Overview</a>
+          — this is most of <span class="path">data/index.json</span></td>
+        </tr>
+        <tr>
+          <td class="path">camera_models.json</td>
+          <td class="path">ground_truth</td>
+          <td class="txt">Factory calibration of the three cameras: the projection model and its
+          parameters, and each camera's pose in the device frame.</td>
+          <td class="txt"><a href="cameras.html">Cameras</a>, <a href="scene3d.html">3D scene</a>,
+          <a href="gaze.html">Eye gaze</a> — shipped verbatim in the payload as
+          <span class="mono">cameras</span></td>
+        </tr>
+        <tr>
+          <td class="path">headset_trajectory.csv</td>
+          <td class="path">ground_truth</td>
+          <td class="txt">Motion-capture pose of the headset per annotated timestamp: translation
+          and quaternion, device to world.</td>
+          <td class="txt"><a href="scene3d.html">3D scene</a>, <a href="sequence.html">Sequence viewer</a></td>
+        </tr>
+        <tr>
+          <td class="path">dynamic_objects.csv</td>
+          <td class="path">ground_truth</td>
+          <td class="txt">Motion-capture pose of every object in the recording, per timestamp,
+          mapping that object's model frame to world.</td>
+          <td class="txt"><a href="objects.html">Objects</a>, <a href="scene3d.html">3D scene</a>,
+          <a href="sequence.html">Sequence viewer</a></td>
+        </tr>
+        <tr>
+          <td class="path">box2d_objects.csv</td>
+          <td class="path">ground_truth</td>
+          <td class="txt">A 2D box per object per camera stream, with the visibility ratio (0–1) the
+          release reports for it.</td>
+          <td class="txt"><a href="sequence.html">Sequence viewer</a> overlay,
+          <a href="objects.html">Objects</a></td>
+        </tr>
+        <tr>
+          <td class="path">box2d_hands.csv</td>
+          <td class="path">ground_truth</td>
+          <td class="txt">The same for the left and right hand.</td>
+          <td class="txt"><a href="sequence.html">Sequence viewer</a> overlay,
+          <a href="hands.html">Hands</a></td>
+        </tr>
+        <tr>
+          <td class="path">umetrack_hand_pose_trajectory.jsonl</td>
+          <td class="path">hand_data</td>
+          <td class="txt">UmeTrack hand pose per timestamp: the wrist transform plus
+          <span id="tUme">22</span> joint angles per hand, and a confidence value.</td>
+          <td class="txt"><a href="hands.html">Hands</a>, <a href="scene3d.html">3D scene</a> (wrists)</td>
+        </tr>
+        <tr>
+          <td class="path">mano_hand_pose_trajectory.jsonl</td>
+          <td class="path">hand_data</td>
+          <td class="txt">MANO hand pose for the same frames: wrist transform plus
+          <span id="tMano">15</span> pose coefficients per hand.</td>
+          <td class="txt"><a href="hands.html">Hands</a></td>
+        </tr>
+        <tr>
+          <td class="path">umetrack_hand_user_profile.json</td>
+          <td class="path">hand_data</td>
+          <td class="txt">The participant's hand shape for the UmeTrack model — the bone lengths the
+          joint angles articulate.</td>
+          <td class="txt">Not used. This site shows wrist poses, boxes and joint angles; it never
+          poses a hand mesh, so no shape is needed.</td>
+        </tr>
+        <tr>
+          <td class="path">masks/mask_*.csv</td>
+          <td class="path">ground_truth</td>
+          <td class="txt">Seven per-frame quality signals, one file each — <span class="mono">qa_pass</span>,
+          <span class="mono">good_exposure</span>, <span class="mono">hand_visible</span>,
+          <span class="mono">object_visible</span>, <span class="mono">hand_pose_available</span>,
+          <span class="mono">headset_pose_available</span>, <span class="mono">object_pose_available</span>
+          — with a column per camera stream.</td>
+          <td class="txt"><a href="quality.html">Annotation quality</a>,
+          <a href="sequence.html">Sequence viewer</a></td>
+        </tr>
+        <tr>
+          <td class="path">timecode_devicetime_mapping.csv</td>
+          <td class="path">ground_truth</td>
+          <td class="txt">The clock bridge: the recording's timecode, which the annotations are
+          stamped in, against Aria device time, which VRS and MPS are stamped in.</td>
+          <td class="txt">Build step only. The payload keeps the first timecode as
+          <span class="mono">timecode_ns_first</span>.</td>
+        </tr>
+        <tr>
+          <td class="path">mps/slam/</td>
+          <td class="path piece">mps_slam_trajectories, mps_slam_points, mps_slam_calibration, mps_slam_summary</td>
+          <td class="txt">Aria Machine Perception Services output, in device time: the closed-loop
+          headset trajectory at about 1 kHz with a per-sample quality score, the semidense point
+          cloud with a per-point distance standard deviation, online calibration, and a
+          run summary.</td>
+          <td class="txt"><a href="scene3d.html">3D scene</a> (points and SLAM path)</td>
+        </tr>
+        <tr>
+          <td class="path">mps/eye_gaze/</td>
+          <td class="path">mps_eye_gaze</td>
+          <td class="txt">Eye gaze in the Central Pupil Frame: per-eye yaw, pitch and gaze depth, as
+          a general estimate and, where the wearer was calibrated, a personalised one.</td>
+          <td class="txt"><a href="gaze.html">Eye gaze</a> — the payload records which variant was
+          taken in <span class="mono">gaze.source</span></td>
+        </tr>
+        <tr>
+          <td class="path">license.txt</td>
+          <td class="path piece">ground_truth, hand_data</td>
+          <td class="txt">The HOT3D license the data is used under. The download manifest lists it
+          inside both of the pieces whose contents it enumerates.</td>
+          <td class="txt">See <a href="#terms">Provenance and terms</a></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <figcaption>The Aria recording layout, release v4.0.0. Piece names are the keys of the official
+  download manifest; the grouping of files into pieces is taken from it.</figcaption>
+
+  <h2>Sizes</h2>
+  <p>The full HOT3D release is about 920 GB: 526 GB for the 198 Aria recordings and 394 GB for the
+  226 Quest 3 recordings, plus a separate archive of the 33-object model library. The two halves
+  cover the same task and the same object library on different headsets; this site only reads the
+  Aria half.</p>
+
+  <h3>What was downloaded here</h3>
+  <p>Each Aria recording is published as ten pieces. Eight of them were taken for this work — every
+  piece these pages read. The two left behind are the convenience preview mp4, which this site
+  re-renders from the VRS anyway, and the MPS artifacts bundle, which holds intermediates none of
+  these pages use.</p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="no-sort">Piece</th>
+          <th class="no-sort num">All 198 Aria</th>
+          <th class="no-sort num">Per recording</th>
+          <th class="no-sort num">The 12 featured</th>
+          <th class="no-sort">Taken</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td class="path">main_vrs</td><td class="num">329.36 GB</td><td class="num">1.66 GB</td><td class="num">19.89 GB</td><td>yes</td></tr>
+        <tr><td class="path">mps_slam_points</td><td class="num">83.65 GB</td><td class="num">422.5 MB</td><td class="num">5.26 GB</td><td>yes</td></tr>
+        <tr><td class="path">mps_slam_trajectories</td><td class="num">5.06 GB</td><td class="num">25.5 MB</td><td class="num">306.6 MB</td><td>yes</td></tr>
+        <tr><td class="path">hand_data</td><td class="num">956.7 MB</td><td class="num">4.8 MB</td><td class="num">83.9 MB</td><td>yes</td></tr>
+        <tr><td class="path">ground_truth</td><td class="num">667.3 MB</td><td class="num">3.4 MB</td><td class="num">57.0 MB</td><td>yes</td></tr>
+        <tr><td class="path">mps_eye_gaze</td><td class="num">45.6 MB</td><td class="num">230 kB</td><td class="num">2.8 MB</td><td>yes</td></tr>
+        <tr><td class="path">mps_slam_calibration</td><td class="num">43.3 MB</td><td class="num">219 kB</td><td class="num">2.6 MB</td><td>yes</td></tr>
+        <tr><td class="path">mps_slam_summary</td><td class="num">143 kB</td><td class="num">722 B</td><td class="num">9 kB</td><td>yes</td></tr>
+        <tr><td class="path">video_main_rgb</td><td class="num">17.78 GB</td><td class="num">89.8 MB</td><td class="num">1.03 GB</td><td class="sub">no — preview mp4</td></tr>
+        <tr><td class="path">mps_artifacts</td><td class="num">88.79 GB</td><td class="num">448.5 MB</td><td class="num">5.57 GB</td><td class="sub">no — intermediates</td></tr>
+      </tbody>
+      <tfoot>
+        <tr>
+          <th class="no-sort">Eight pieces taken</th>
+          <th class="no-sort num">419.77 GB</th>
+          <th class="no-sort num">2.12 GB</th>
+          <th class="no-sort num">25.60 GB</th>
+          <th class="no-sort"></th>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+  <figcaption>Byte counts summed from the HOT3D v4.0.0 download manifest
+  (<span class="path">Hot3DAria_download_urls.json</span>), not from the unpacked folders; the
+  pieces are zipped, so on disk they are larger. The <span class="path">main_vrs</span> column
+  agrees with this site's own metadata: the <span class="mono">vrs_gb</span> field of
+  <span class="path">data/index.json</span> sums to <span class="mono" id="sVrsIx">—</span> over
+  the 198 Aria recordings.</figcaption>
+
+  <h3>The twelve recordings featured in full</h3>
+  <p>Twelve recordings carry a payload, a video and stills on this site; the other 186 appear only
+  as metadata rows on <a href="recordings.html">Recordings</a>. All twelve ship ground truth.</p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="no-sort">Recording</th>
+          <th class="no-sort">Participant</th>
+          <th class="no-sort num">Objects</th>
+          <th class="no-sort num">RGB frames</th>
+          <th class="no-sort num">Duration</th>
+          <th class="no-sort num">QA pass (RGB)</th>
+          <th class="no-sort num">Source VRS</th>
+        </tr>
+      </thead>
+      <tbody id="featBody"><tr><td colspan="7" class="loading">loading…</td></tr></tbody>
+      <tfoot id="featFoot"></tfoot>
+    </table>
+  </div>
+  <figcaption>Read from <span class="path">data/index.json</span> when this page loaded. QA pass is
+  the share of RGB frames the release marks as passing its quality check.</figcaption>
+
+  <h3>What this site ships</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="no-sort">Path</th>
+          <th class="no-sort num">Files</th>
+          <th class="no-sort num">Size</th>
+          <th class="no-sort">Measured how</th>
+        </tr>
+      </thead>
+      <tbody id="shipBody"><tr><td colspan="4" class="loading">loading…</td></tr></tbody>
+    </table>
+  </div>
+  <figcaption>Sizes measured in your browser as this page loaded, except where the row says
+  otherwise. The 1.66 GB of source VRS behind a recording becomes a payload of a few MB.</figcaption>
+
+  <h2>From the release to the payload</h2>
+  <p>One extraction pass per recording writes <span class="path">data/seq/&lt;SEQ&gt;.json</span>;
+  the numbers below are read from <span class="path" id="sExPath">—</span> now, as an example.
+  Nothing is re-estimated anywhere in this pipeline — every pose, box and mask is the released
+  value, moved onto a common frame grid and re-encoded.</p>
+  <ol class="steps">
+    <li><b>The frame grid is the RGB stream.</b> Row <span class="mono">i</span> of every per-frame
+    array on this site is RGB frame <span class="mono">i</span> of the VRS stream
+    <span class="mono">214-1</span>, on the camera's own 30 Hz clock. This recording has
+    <span class="mono" id="sF">—</span> frames over <span class="mono" id="sDur">—</span> at
+    <span class="mono" id="sFps">—</span> fps, and <span class="mono">t</span> holds the seconds
+    from the first frame.</li>
+    <li><b>Ground truth is annotated at 60 Hz and resampled onto it.</b> The release annotates the
+    RGB exposures interleaved with the two SLAM cameras, so the annotation grid runs at twice the
+    frame rate. Each pose, box and mask is taken from the nearest annotated timestamp, accepted only
+    within 8 ms; beyond that the frame is left unannotated — NaN in a float array, 255 in a mask.
+    <span id="s255">—</span></li>
+    <li><b>The MPS streams are mapped through the timecode.</b> SLAM and eye gaze are stamped in
+    Aria device time while the annotations are stamped in the recording's timecode, so
+    <span class="path">timecode_devicetime_mapping.csv</span> converts before sampling. The payload
+    keeps the first timecode, <span class="mono" id="sTc">—</span> ns. The closed-loop trajectory
+    arrives at <span class="mono" id="sSlamRate">—</span> (<span class="mono" id="sSlamRows">—</span>
+    samples here) and is sampled down to one pose per frame; its per-sample quality score is carried
+    across as-is, including where the release leaves it empty.</li>
+    <li><b>Semidense points are filtered, then evenly subsampled.</b> Points whose
+    <span class="mono">dist_std</span> — the MPS per-point distance standard deviation, in metres —
+    is above <span class="mono" id="sStd">—</span> are dropped, and
+    the rest are thinned by a fixed stride so the shipped cloud stays around 60k points and still
+    covers the whole room: <span class="mono" id="sPts">—</span>.</li>
+    <li><b>Video is re-rendered from the VRS.</b> The RGB stream is rotated 90° clockwise to
+    upright, scaled from <span class="mono" id="sRgbWH">—</span> to
+    <span class="mono" id="sVidWH">—</span>, and encoded as H.264 at CRF
+    <span class="mono" id="sCrf">—</span>, <span class="mono" id="sVidFps">—</span> fps, so mp4
+    frame <span class="mono">i</span> is payload row <span class="mono">i</span>. The SLAM cameras
+    get <span class="mono" id="sStills">—</span> stills each instead of video, evenly spaced through
+    the recording, plus one poster frame for the player.</li>
+    <li><b>Object models are compacted.</b> The 33 released meshes have their textures resampled to
+    at most <span class="mono" id="sTex">—</span> px and their geometry decimated to at most 40k
+    faces, then are written as glb: <span class="mono" id="sFaces">—</span> triangles across the
+    library and <span class="mono" id="sMb">—</span> on disk.
+    <span id="sCap">—</span></li>
+  </ol>
+
+  <h3>Where the bytes go in one payload</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="no-sort">Section</th>
+          <th class="no-sort">What it is</th>
+          <th class="no-sort num">Bytes</th>
+          <th class="no-sort num">Share</th>
+          <th class="no-sort"></th>
+        </tr>
+      </thead>
+      <tbody id="payBody"><tr><td colspan="5" class="loading">loading…</td></tr></tbody>
+    </table>
+  </div>
+  <figcaption id="payCap">Composition of one sequence payload, measured from the file this page
+  fetched.</figcaption>
+
+  <h2>Conventions a reader needs</h2>
+  <dl class="dl">
+    <dt>quaternions</dt>
+    <dd><span class="mono">w, x, y, z</span> — the release's order, kept everywhere on this site,
+    in the payload and in <span class="path">assets/site.js</span>.</dd>
+    <dt>poses</dt>
+    <dd>A pose maps its own frame to world: an object pose takes a point of that object's model to
+    world coordinates, the headset pose takes a point in the device frame to world. There is no
+    inverse convention anywhere in the payload.</dd>
+    <dt>units</dt>
+    <dd>Metres, seconds, radians. <span class="mono">t</span> is seconds from the first RGB frame,
+    not device time.</dd>
+    <dt>NaN</dt>
+    <dd>A float array carries NaN on every frame the release does not annotate — a hand out of
+    view, an occluded object, a frame outside the annotated range. Gaps are never interpolated, and
+    the charts on this site leave them open rather than bridging them.</dd>
+    <dt>mask 255</dt>
+    <dd>Masks are uint8: 1 true, 0 false, <b>255 not annotated</b>. Treating 255 as true, or as a
+    large number, is the easy mistake.</dd>
+    <dt>2D boxes</dt>
+    <dd><span class="mono">box_frame</span> is <span class="mono" id="sBoxFrame">—</span>: boxes are
+    stored in the upright display frame, already rotated to match the video and the stills, so a
+    page scales by <span class="mono">videoWidth / display_wh[stream][0]</span> and nothing else.
+    Frame sizes here: <span class="mono" id="sDisp">—</span>.</dd>
+    <dt>streams</dt>
+    <dd><span class="mono" id="sStreams">—</span> — the stream ids as VRS names them, mapped to the
+    names the payload uses.</dd>
+  </dl>
+
+  <h3>What is unannotated in one recording</h3>
+  <p>These counts are the point of the two conventions above. They are read from the payload for
+  <span class="path" id="sExPath2">—</span>, a recording that ships full ground truth — the gaps are
+  not defects, they are the hands leaving the cameras' view and the objects being occluded.</p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="no-sort">Signal</th>
+          <th class="no-sort num">Frames with a value</th>
+          <th class="no-sort num">NaN frames</th>
+          <th class="no-sort num">Share present</th>
+        </tr>
+      </thead>
+      <tbody id="nanBody"><tr><td colspan="4" class="loading">loading…</td></tr></tbody>
+    </table>
+  </div>
+  <figcaption>Counts over the RGB frame grid of that recording.</figcaption>
+
+  <div class="table-wrap" style="margin-top:16px">
+    <table>
+      <thead>
+        <tr>
+          <th class="no-sort">Mask</th>
+          <th class="no-sort num">RGB true</th>
+          <th class="no-sort num">RGB false</th>
+          <th class="no-sort num">RGB 255</th>
+          <th class="no-sort num">SLAM-L 255</th>
+          <th class="no-sort num">SLAM-R 255</th>
+        </tr>
+      </thead>
+      <tbody id="maskBody"><tr><td colspan="6" class="loading">loading…</td></tr></tbody>
+    </table>
+  </div>
+  <figcaption>The seven quality masks of the same recording, per camera stream. A mask is released
+  per stream, so a frame can pass in one camera and fail in another.</figcaption>
+
+  <h2 id="terms">Provenance and terms</h2>
+  <p>HOT3D is a release by Meta Reality Labs — see the
+  <a href="https://facebookresearch.github.io/hot3d/">project page</a> and the paper,
+  <a href="https://arxiv.org/abs/2411.19167">arXiv:2411.19167</a>, published at CVPR 2025. The data
+  is used here under its license, which ships as <span class="path">license.txt</span> inside every
+  download; the version behind this site is v4.0.0, and every Aria row in
+  <span class="path">data/index.json</span> reports release version
+  <span class="mono" id="sVer">—</span>.</p>
+  <p>This site is not a mirror of the release. It serves derived visualisations of
+  <span class="mono" id="sFeatN">—</span> of the <span class="mono" id="sAriaN">—</span> Aria
+  recordings: a re-encoded 704 px video, a few MB of resampled annotations per recording, a thinned
+  point cloud, and decimated object models. Nothing here is a substitute for the release; to train
+  or evaluate on HOT3D, download it from the project page.</p>
+  <p>Of the 198 Aria recordings, <span class="mono" id="sGt">—</span> ship hand and object ground
+  truth; the rest hold their annotations back as the benchmark's test split, and appear on this site
+  only as metadata. Where ground truth is present it comes from a motion-capture system, so the
+  poses are independent of anything estimable from the images themselves — which is what makes the
+  release usable as a reference and not only as training data.</p>
+
+  <h2>Rebuilding this site</h2>
+  <ol class="steps">
+    <li><b>Download.</b> Take the eight data pieces per recording listed above, using the URL
+    manifest from the project page.</li>
+    <li><b>Build the index.</b> Read every recording's <span class="path">metadata.json</span>, its
+    RGB frame count and its VRS size into <span class="path">data/index.json</span> — one row per
+    recording, both devices.</li>
+    <li><b>Extract a payload per featured recording.</b> Resample the ground truth, the masks and
+    the MPS streams onto the RGB frame grid as described above, and write each array as base64
+    float32 (uint8 for masks) into <span class="path">data/seq/&lt;SEQ&gt;.json</span>.</li>
+    <li><b>Render media.</b> One 704 px mp4, one poster and twelve SLAM stills per featured
+    recording, with a <span class="path">&lt;SEQ&gt;_media.json</span> recording the encode
+    settings.</li>
+    <li><b>Compact the object library.</b> Resample textures, decimate meshes, write
+    <span class="path">data/objects/&lt;uid&gt;.glb</span> and the index
+    <span class="path">data/objects.json</span> with before and after counts.</li>
+    <li><b>Serve the repo root.</b> There is no build step: each page is one HTML file that loads
+    <span class="path">assets/site.css</span> and <span class="path">assets/site.js</span> and
+    fetches the JSON it needs.</li>
+  </ol>
+</main>
+
+<script>
+HOT3D.init();
+
+const FEATURED = [
+  'P0001_4bf4e21a', 'P0002_65085bfc', 'P0003_ebdc6ff7', 'P0009_e71e2f24',
+  'P0010_573b2de6', 'P0010_8ff3e5c4', 'P0011_2255f410', 'P0011_72efb935',
+  'P0012_130a66e1', 'P0014_1fdca00e', 'P0015_cc5dfd13', 'P0015_e7458eb3',
+];
+const EX = 'P0010_573b2de6';            // the example payload this page measures
+
+const $ = (id) => document.getElementById(id);
+const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+const setHTML = (id, v) => { const el = $(id); if (el) el.innerHTML = v; };
+const n = HOT3D.fmt.n;
+
+/** decimal byte sizes, matching the units the release manifest uses */
+function bytes(b) {
+  if (!isFinite(b)) return '—';
+  if (b >= 1e9) return (b / 1e9).toFixed(2) + ' GB';
+  if (b >= 1e6) return (b / 1e6).toFixed(2) + ' MB';
+  if (b >= 1e3) return (b / 1e3).toFixed(1) + ' kB';
+  return b + ' B';
+}
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const tr = (cells) => '<tr>' + cells.join('') + '</tr>';
+const td = (v, cls) => `<td${cls ? ` class="${cls}"` : ''}>${v}</td>`;
+
+/** text of a file, so its size is the real number of bytes served (payloads are ASCII) */
+async function text(path) {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
+  return r.text();
+}
+/** size of a binary file without downloading it; null where the host does not report it */
+async function headSize(path) {
+  try {
+    const r = await fetch(path, { method: 'HEAD' });
+    if (!r.ok) return NaN;
+    const v = Number(r.headers.get('content-length'));
+    return v > 0 ? v : NaN;
+  } catch (e) { return NaN; }
+}
+
+(async () => {
+  const status = $('status');
+  try {
+    const ixText = await text('data/index.json');
+    const ix = JSON.parse(ixText);
+    const aria = ix.sequences.filter(r => r.device === 'Aria');
+    const rows = new Map(aria.map(r => [r.seq, r]));
+    const feat = FEATURED.map(s => rows.get(s)).filter(Boolean);
+
+    const payText = await text(`data/seq/${EX}.json`);
+    const seq = JSON.parse(payText);
+    const objText = await text('data/objects.json');
+    const objs = JSON.parse(objText);
+    const mediaText = await text(`media/${EX}_media.json`);
+    const media = JSON.parse(mediaText);
+
+    /* ---------- headline figures ---------- */
+    const featFrames = feat.reduce((a, r) => a + r.rgb_frames, 0);
+    const featSecs = feat.reduce((a, r) => a + r.duration_s, 0);
+    const featVrs = feat.reduce((a, r) => a + r.vrs_gb, 0);
+    set('fAria', n(aria.length));
+    set('fFeat', n(feat.length));
+    set('fFrames', n(featFrames));
+    set('fMin', (featSecs / 60).toFixed(1));
+    set('fVrs', featVrs.toFixed(1) + ' GB');
+    set('fPay', bytes(payText.length));
+
+    set('sVrsIx', aria.reduce((a, r) => a + r.vrs_gb, 0).toFixed(2) + ' GB');
+    set('sFeatN', feat.length);
+    set('sAriaN', aria.length);
+    set('sGt', n(aria.filter(r => r.have_gt).length));
+    const versions = [...new Set(aria.map(r => r.version))];
+    set('sVer', versions.join(', '));
+    set('tUme', seq.hands.left.umetrack.n_params);
+    set('tMano', seq.hands.left.mano.n_params);
+
+    /* ---------- the twelve featured recordings ---------- */
+    $('featBody').innerHTML = feat.map(r => tr([
+      td(`<span class="mono">${esc(HOT3D.fmt.seq(r.seq))}</span>`),
+      td(esc(r.participant)),
+      td(r.objects.length, 'num'),
+      td(n(r.rgb_frames), 'num'),
+      td(HOT3D.fmt.clock(r.duration_s), 'num'),
+      td(r.qa_pass_rgb === null ? '—' : HOT3D.fmt.pct(r.qa_pass_rgb), 'num'),
+      td(r.vrs_gb.toFixed(2) + ' GB', 'num'),
+    ])).join('');
+    $('featFoot').innerHTML = tr([
+      `<th class="no-sort">${feat.length} recordings</th>`,
+      `<th class="no-sort">${new Set(feat.map(r => r.participant)).size} participants</th>`,
+      `<th class="no-sort num">${new Set(feat.flatMap(r => r.objects)).size} distinct</th>`,
+      `<th class="no-sort num">${n(featFrames)}</th>`,
+      `<th class="no-sort num">${HOT3D.fmt.clock(featSecs)}</th>`,
+      `<th class="no-sort num"></th>`,
+      `<th class="no-sort num">${featVrs.toFixed(2)} GB</th>`,
+    ]);
+
+    /* ---------- what the site ships ---------- */
+    const stills = Object.values(media.slam).reduce((a, s) => a + s.stills.length, 0);
+    const glbMb = objs.objects.reduce((a, o) => a + o.mb_after, 0);
+    const glbMbBefore = objs.objects.reduce((a, o) => a + o.mb_before, 0);
+    const [mp4Size, posterSize] = await Promise.all([
+      headSize(`media/${EX}_rgb.mp4`), headSize(`media/${EX}_poster.jpg`),
+    ]);
+    const perFrame = payText.length / seq.F;
+    $('shipBody').innerHTML = [
+      tr([td('<span class="path">data/index.json</span>'), td('1', 'num'), td(bytes(ixText.length), 'num'),
+          td(`fetched here — ${n(ix.totals.recordings)} rows, ${n(ix.totals.aria)} Aria and ${n(ix.totals.quest)} Quest 3`, 'txt')]),
+      tr([td('<span class="path">data/seq/&lt;SEQ&gt;.json</span>'), td(n(feat.length), 'num'), td(bytes(payText.length), 'num'),
+          td(`fetched here for ${esc(EX)}: ${Math.round(perFrame)} B per RGB frame. One file per featured recording`, 'txt')]),
+      tr([td('<span class="path">data/objects.json</span>'), td('1', 'num'), td(bytes(objText.length), 'num'),
+          td(`fetched here — the ${n(objs.objects.length)}-object index`, 'txt')]),
+      tr([td('<span class="path">data/objects/&lt;uid&gt;.glb</span>'), td(n(objs.objects.length), 'num'), td(glbMb.toFixed(1) + ' MB', 'num'),
+          td(`summed from the index's own after-compaction column (${glbMbBefore.toFixed(1)} MB before)`, 'txt')]),
+      tr([td('<span class="path">media/&lt;SEQ&gt;_rgb.mp4</span>'), td(n(feat.length), 'num'), td(isFinite(mp4Size) ? bytes(mp4Size) : '—', 'num'),
+          td(isFinite(mp4Size) ? `measured here for ${esc(EX)} without downloading it` : 'this host does not report a file size for the video', 'txt')]),
+      tr([td('<span class="path">media/&lt;SEQ&gt;_*.jpg</span>'), td(n(feat.length * (stills + 1)), 'num'), td(isFinite(posterSize) ? bytes(posterSize) : '—', 'num'),
+          td(`${stills} SLAM stills and one poster per recording; size shown is one poster`, 'txt')]),
+      tr([td('<span class="path">media/&lt;SEQ&gt;_media.json</span>'), td(n(feat.length), 'num'), td(bytes(mediaText.length), 'num'),
+          td('fetched here — the encode settings and the SLAM still list', 'txt')]),
+    ].join('');
+
+    /* ---------- pipeline numbers ---------- */
+    set('sExPath', `data/seq/${EX}.json`);
+    set('sExPath2', EX);
+    set('sF', n(seq.F));
+    set('sDur', HOT3D.fmt.clock(seq.duration_s));
+    set('sFps', seq.fps.toFixed(1));
+    set('sTc', n(seq.timecode_ns_first));
+    set('sSlamRate', seq.slam.rate_hz.toFixed(0) + ' Hz');
+    set('sSlamRows', n(seq.slam.rows));
+    set('sStd', (seq.points.dist_std_max_m * 100).toFixed(0) + ' cm');
+    set('sPts', `${n(seq.points.total)} released → ${n(seq.points.kept)} kept (${HOT3D.fmt.pct(seq.points.kept / seq.points.total, 0)}) → ${n(seq.points.shown)} shipped`);
+    const wh = seq.display_wh.rgb;
+    set('sRgbWH', `${wh[0]}×${wh[1]}`);
+    set('sVidWH', `${media.size_px}×${media.size_px}`);
+    set('sCrf', media.crf);
+    set('sVidFps', media.fps.toFixed(0));
+    set('sStills', Object.values(media.slam)[0].stills.length);
+    set('sTex', objs.texture_max_px);
+    const facesBefore = objs.objects.reduce((a, o) => a + o.faces_released, 0);
+    const facesAfter = objs.objects.reduce((a, o) => a + o.faces, 0);
+    const atCap = objs.objects.filter(o => o.faces >= 40000).length;
+    set('sFaces', `${n(facesBefore)} → ${n(facesAfter)}`);
+    set('sMb', `${glbMbBefore.toFixed(1)} MB → ${glbMb.toFixed(1)} MB`);
+    set('sCap', atCap
+      ? `${atCap} of the ${objs.objects.length} models sit at the 40k cap; the rest were already below it and keep their released geometry.`
+      : `No model in the library reached the 40k cap, so every mesh keeps its released geometry.`);
+
+    /* the 8 ms tolerance, shown where it actually bites */
+    const streamsOf = (m) => Object.keys(seq.masks[m]);
+    let n255 = 0; const frames255 = new Set();
+    for (const m of Object.keys(seq.masks)) {
+      for (const st of streamsOf(m)) {
+        const a = HOT3D.u8(seq.masks[m][st]);
+        for (let i = 0; i < a.length; i++) if (a[i] === 255) { n255++; frames255.add(i); }
+      }
+    }
+    const slamFrames = Object.values(media.slam).map(s => s.count);
+    const slamSame = slamFrames.every(c => c === slamFrames[0]);
+    const slamTxt = slamSame
+      ? `The SLAM streams of this recording hold ${n(slamFrames[0])} frames against ${n(seq.F)} RGB frames`
+      : `The SLAM streams of this recording hold ${slamFrames.map(n).join(' and ')} frames against ${n(seq.F)} RGB frames`;
+    if (n255 === 0) {
+      setHTML('s255', `${slamTxt}, and no mask entry in it is 255 — every frame found an annotation inside the tolerance.`);
+    } else {
+      const list = [...frames255].sort((a, b) => a - b);
+      const where = list.length === 1
+        ? `frame ${n(list[0])}${list[0] === seq.F - 1 ? ', the last one' : ''}`
+        : `${n(list.length)} frames`;
+      setHTML('s255', `${slamTxt}: ${n(n255)} mask entries here are 255, all at ${where}, which is exactly what the rule is for.`);
+    }
+
+    /* ---------- payload composition ---------- */
+    const sections = [
+      ['hands', 'wrist poses, joint angles, confidences and 2D boxes for both hands, both models'],
+      ['objects', 'pose per frame per object, plus a 2D box and visibility per camera'],
+      ['points', `semidense scene points (${n(seq.points.shown)} × 3 float32)`],
+      ['slam', 'the headset\'s own SLAM trajectory and quality, sampled at frame times'],
+      ['headset', 'motion-capture headset pose per frame'],
+      ['masks', `${Object.keys(seq.masks).length} quality masks × ${streamsOf('qa_pass').length} streams`],
+      ['gaze', 'per-eye yaw, pitch and gaze depth'],
+      ['t', 'the frame timeline in seconds'],
+      ['cameras', 'the released camera models, verbatim'],
+    ];
+    const sized = sections.map(([k, what]) => [k, what, JSON.stringify(seq[k]).length]);
+    const known = sized.reduce((a, s) => a + s[2], 0);
+    sized.push(['(keys and scalars)', 'field names, identifiers, summary block', Math.max(payText.length - known, 0)]);
+    const max = Math.max(...sized.map(s => s[2]));
+    $('payBody').innerHTML = sized.sort((a, b) => b[2] - a[2]).map(([k, what, b]) => tr([
+      td(`<span class="mono">${esc(k)}</span>`),
+      td(esc(what), 'txt'),
+      td(n(b), 'num'),
+      td(HOT3D.fmt.pct(b / payText.length, 1), 'num'),
+      td(`<span class="bar" style="width:${(100 * b / max).toFixed(1)}%"></span>`, 'barcell'),
+    ])).join('');
+    set('payCap', `Composition of data/seq/${EX}.json — ${bytes(payText.length)} for ${n(seq.F)} frames, measured in your browser. The two hand models and the ${seq.objects.length} object tracks dominate; the point cloud is a single fixed-size block.`);
+
+    /* ---------- conventions, from the payload ---------- */
+    set('sBoxFrame', `"${seq.box_frame}"`);
+    set('sDisp', Object.entries(seq.display_wh).map(([k, v]) => `${k} ${v[0]}×${v[1]}`).join(', '));
+    set('sStreams', Object.entries(seq.streams).map(([k, v]) => `${k} → ${v}`).join(', '));
+
+    /* ---------- availability in the example recording ---------- */
+    const countFinite = (b64, stride) => {
+      const a = HOT3D.f32(b64);
+      let c = 0;
+      for (let i = 0; i < a.length; i += (stride || 1)) if (isFinite(a[i])) c++;
+      return c;
+    };
+    const F = seq.F;
+    const avail = [
+      ['headset pose (motion capture)', seq.headset.frames],
+      ['SLAM trajectory (MPS)', countFinite(seq.slam.T, 3)],
+      ['SLAM pose quality score', countFinite(seq.slam.quality, 1)],
+      [`eye gaze (${seq.gaze.source})`, countFinite(seq.gaze.depth, 1)],
+      ['left wrist, UmeTrack', seq.hands.left.umetrack.frames],
+      ['right wrist, UmeTrack', seq.hands.right.umetrack.frames],
+      ['left wrist, MANO', seq.hands.left.mano.frames],
+      ['right wrist, MANO', seq.hands.right.mano.frames],
+      ['left hand box, RGB', seq.hands.left.boxes.rgb.frames_seen],
+      ['right hand box, RGB', seq.hands.right.boxes.rgb.frames_seen],
+    ];
+    for (const o of seq.objects) avail.push([`${o.name} pose`, o.frames_with_pose]);
+    $('nanBody').innerHTML = avail.map(([label, k]) => tr([
+      td(esc(label)),
+      td(`${n(k)} of ${n(F)}`, 'num'),
+      td(n(F - k), 'num'),
+      td(HOT3D.fmt.pct(k / F, 1), 'num'),
+    ])).join('');
+
+    /* ---------- mask value counts ---------- */
+    const counts = (b64) => {
+      const a = HOT3D.u8(b64); const c = { 1: 0, 0: 0, 255: 0 };
+      for (let i = 0; i < a.length; i++) c[a[i]] = (c[a[i]] || 0) + 1;
+      return c;
+    };
+    $('maskBody').innerHTML = Object.keys(seq.masks).map(m => {
+      const r = counts(seq.masks[m].rgb);
+      const l = counts(seq.masks[m].slam_left), rr = counts(seq.masks[m].slam_right);
+      return tr([
+        td(`<span class="mono">${esc(m)}</span>`),
+        td(n(r[1] || 0), 'num'), td(n(r[0] || 0), 'num'), td(n(r[255] || 0), 'num'),
+        td(n(l[255] || 0), 'num'), td(n(rr[255] || 0), 'num'),
+      ]);
+    }).join('');
+
+    status.remove();
+  } catch (err) {
+    status.className = 'warn-box';
+    status.textContent = `Could not read the data files (${err.message}). The prose on this page still ` +
+      `describes the release and the pipeline; the measured figures are the ones showing a dash.`;
+    for (const id of ['featBody', 'shipBody', 'payBody', 'nanBody', 'maskBody']) {
+      const el = $(id);
+      if (!el) continue;
+      const cols = el.closest('table').querySelectorAll('thead th').length || 1;
+      el.innerHTML = `<tr><td colspan="${cols}" class="note">not measured — the fetch above failed</td></tr>`;
+    }
+  }
+})();
+</script>
+</body>
+</html>

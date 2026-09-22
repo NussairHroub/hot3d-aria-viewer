@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Recordings · HOT3D Aria</title>
+<meta name="description" content="All 198 Aria recordings in HOT3D: participant, duration, RGB frames, QA pass rate, objects handled, ground-truth availability, VRS size and which release parts are present.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+<style>
+  .posters { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); }
+  .poster { display: block; text-decoration: none; color: inherit; background: var(--surface);
+            border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
+            transition: border-color .15s, box-shadow .15s; }
+  .poster:hover { border-color: var(--line-2); box-shadow: var(--shadow); }
+  .poster img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; background: var(--surface-2); }
+  .poster .cap { padding: 7px 9px 8px; font-size: 12.5px; line-height: 1.35; }
+  .poster .cap .id { font-family: var(--mono); font-size: 11.5px; color: var(--ink); white-space: nowrap; }
+  .poster .cap .sub { color: var(--muted); font-size: 11.5px; }
+  .controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin: 0 0 10px; }
+  .controls input[type="search"] { min-width: 190px; }
+  .controls select { max-width: 210px; }
+  th.sorted { color: var(--ink); }
+  th .arw { color: var(--accent); font-size: 10px; }
+  tr.feat td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+  td.objs { white-space: normal; min-width: 200px; max-width: 300px; font-size: 12px;
+            line-height: 1.4; color: var(--ink-2); }
+  td.rec a { text-decoration: none; font-family: var(--mono); }
+  td.rec a:hover { text-decoration: underline; }
+  .parts { display: inline-flex; gap: 3px; }
+  .parts i { font-style: normal; font-family: var(--mono); font-size: 10.5px; line-height: 1;
+             padding: 2px 3px; border-radius: 3px; border: 1px solid var(--line-2); color: var(--muted); }
+  .parts i.on { color: var(--surface); background: var(--accent); border-color: var(--accent); }
+  .qa { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; }
+  .qa .bar { width: 36px; height: 5px; border-radius: 3px; background: var(--surface-2);
+             border: 1px solid var(--line); overflow: hidden; }
+  .qa .bar span { display: block; height: 100%; background: var(--accent); }
+  .miss { color: var(--muted); }
+  #count strong { font-family: var(--mono); font-weight: 500; color: var(--ink); }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div class="page-head">
+    <p class="eyebrow">Browse the release</p>
+    <h1>All Aria recordings</h1>
+    <p class="lede">Every Aria recording in HOT3D, with what the release ships for it. Twelve are
+    featured here in full — video plus the whole annotation payload; the rest appear with their
+    metadata only. Everything on this page is read from <span class="mono">data/index.json</span>
+    when the page loads.</p>
+  </div>
+
+  <section class="figs" id="figs" aria-label="Aria totals">
+    <div class="fig"><div class="n mono" id="fRec">—</div><div class="k">Aria recordings</div></div>
+    <div class="fig"><div class="n mono" id="fMin">—</div><div class="k">minutes recorded</div></div>
+    <div class="fig"><div class="n mono" id="fFrames">—</div><div class="k" id="kFrames">RGB frames</div></div>
+    <div class="fig"><div class="n mono" id="fPart">—</div><div class="k">participants</div></div>
+    <div class="fig"><div class="n mono" id="fObj">—</div><div class="k">distinct objects</div></div>
+    <div class="fig"><div class="n mono" id="fGt">—</div><div class="k">with ground truth</div></div>
+    <div class="fig"><div class="n mono" id="fVrs">—</div><div class="k">GB of raw VRS</div></div>
+  </section>
+  <p class="note" id="partsNote">Reading the index…</p>
+
+  <h2>Featured recordings</h2>
+  <p>These twelve carry a 704 px RGB video and the full per-frame payload, so they open in the
+  sequence and 3D viewers. Each poster is a still from the opening seconds of its recording, not
+  necessarily frame 0 — open the recording for the frame-accurate view.</p>
+  <div class="posters" id="posters"><p class="loading">loading posters…</p></div>
+
+  <h2>Every recording</h2>
+  <p class="note">Click any numeric column header to sort by it; click again to reverse. Recordings
+  without released ground truth have no frame count and no QA rate — those two fields are derived
+  from the annotation files, which are withheld for the benchmark's test split, so they are shown
+  as <span class="miss">—</span> rather than as zero.</p>
+
+  <div class="controls" id="controls">
+    <label class="field">search
+      <input type="search" id="q" placeholder="id, participant, object" autocomplete="off">
+    </label>
+    <label class="field">participant
+      <select id="fParticipant"><option value="">all</option></select>
+    </label>
+    <label class="field">object
+      <select id="fObject"><option value="">all</option></select>
+    </label>
+    <div class="toggles">
+      <label class="toggle"><input type="checkbox" id="onlyGt"> ground truth only</label>
+      <label class="toggle"><input type="checkbox" id="onlyFeat"> featured only</label>
+      <button class="btn" type="button" id="reset">reset</button>
+    </div>
+  </div>
+  <p class="note" id="count">loading…</p>
+
+  <div class="table-wrap">
+    <table id="tbl">
+      <thead><tr id="thead"></tr></thead>
+      <tbody id="tbody"><tr><td colspan="11" class="loading">loading data/index.json…</td></tr></tbody>
+    </table>
+  </div>
+
+  <p class="note" id="questNote"></p>
+</main>
+
+<script>
+HOT3D.init();
+
+(function () {
+  const FEATURED = ['P0001_4bf4e21a', 'P0002_65085bfc', 'P0003_ebdc6ff7', 'P0009_e71e2f24',
+                    'P0010_573b2de6', 'P0010_8ff3e5c4', 'P0011_2255f410', 'P0011_72efb935',
+                    'P0012_130a66e1', 'P0014_1fdca00e', 'P0015_cc5dfd13', 'P0015_e7458eb3'];
+  const PARTS = [
+    { k: 'vrs', ltr: 'V', short: 'VRS', title: 'VRS — raw camera and IMU streams' },
+    { k: 'mps_slam', ltr: 'S', short: 'MPS trajectory', title: 'MPS — closed-loop headset trajectory' },
+    { k: 'mps_points', ltr: 'P', short: 'MPS points', title: 'MPS — semidense scene points' },
+    { k: 'eye_gaze', ltr: 'G', short: 'eye gaze', title: 'MPS — eye gaze' },
+    { k: 'umetrack', ltr: 'U', short: 'UmeTrack', title: 'UmeTrack hand poses' },
+    { k: 'mano', ltr: 'M', short: 'MANO', title: 'MANO hand poses' },
+  ];
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const dash = '<span class="miss" title="not released for this recording">—</span>';
+  const f = HOT3D.fmt;
+
+  const COLS = [
+    { k: 'seq', label: 'Recording', type: 'text', get: (r) => r.seq, cell: (r) =>
+        `<td class="rec">${r.feat ? `<a href="sequence.html#${esc(r.seq)}">${esc(r.seq)}</a>`
+                                  : `<span class="mono">${esc(r.seq)}</span>`}</td>` },
+    { k: 'participant', label: 'Part.', type: 'text', get: (r) => r.participant,
+      cell: (r) => `<td class="mono">${esc(r.participant)}</td>` },
+    { k: 'duration_s', label: 'Duration', type: 'num', get: (r) => r.duration_s,
+      cell: (r) => `<td class="num" title="${f.s(r.duration_s)}">${f.clock(r.duration_s)}</td>` },
+    { k: 'rgb_frames', label: 'RGB frames', type: 'num', get: (r) => r.rgb_frames,
+      cell: (r) => `<td class="num">${r.rgb_frames == null ? dash : f.n(r.rgb_frames)}</td>` },
+    { k: 'qa_pass_rgb', label: 'QA pass', type: 'num', get: (r) => r.qa_pass_rgb, cell: (r) =>
+        `<td class="num">${r.qa_pass_rgb == null ? dash :
+          `<span class="qa"><span class="bar"><span style="width:${(r.qa_pass_rgb * 100).toFixed(1)}%"></span></span>${f.pct(r.qa_pass_rgb)}</span>`}</td>` },
+    { k: 'nobj', label: 'Obj', type: 'num', get: (r) => r.objects.length,
+      cell: (r) => `<td class="num">${r.objects.length}</td>` },
+    { k: 'objects', label: 'Objects handled', type: 'none', get: () => 0,
+      cell: (r) => `<td class="objs">${esc(r.objects.join(', '))}</td>` },
+    { k: 'have_gt', label: 'GT', type: 'num', get: (r) => (r.have_gt ? 1 : 0), cell: (r) =>
+        `<td>${r.have_gt ? '<span class="pill" title="hand and object ground truth released">yes</span>'
+                         : '<span class="miss" title="annotations withheld (test split)">withheld</span>'}</td>` },
+    { k: 'vrs_gb', label: 'VRS', type: 'num', get: (r) => r.vrs_gb,
+      cell: (r) => `<td class="num">${r.vrs_gb.toFixed(2)} GB</td>` },
+    { k: 'parts', label: 'Parts', type: 'num', get: (r) => PARTS.reduce((n, p) => n + (r.has[p.k] ? 1 : 0), 0),
+      cell: (r) => `<td><span class="parts">${PARTS.map((p) =>
+        `<i class="${r.has[p.k] ? 'on' : ''}" title="${p.title}: ${r.has[p.k] ? 'present' : 'absent'}">${p.ltr}</i>`).join('')}</span></td>` },
+    { k: 'viewer', label: 'Viewer', type: 'none', get: () => 0, cell: (r) =>
+        `<td>${r.feat ? `<a href="sequence.html#${esc(r.seq)}">open →</a>`
+                      : '<span class="miss">metadata only</span>'}</td>` },
+  ];
+
+  let rows = [];
+  let sort = { k: 'seq', dir: 1 };
+
+  function drawHead() {
+    $('thead').innerHTML = COLS.map((c) => {
+      const sortable = c.type !== 'none';
+      const active = sortable && sort.k === c.k;
+      const arrow = active ? ` <span class="arw">${sort.dir > 0 ? '▲' : '▼'}</span>` : '';
+      /* the th keeps its implicit columnheader role — aria-sort is only valid there, and a
+         role="button" override would detach the header from its column for screen readers */
+      return `<th scope="col" class="${c.type === 'num' ? 'num ' : ''}${sortable ? '' : 'no-sort '}${active ? 'sorted' : ''}"${
+        sortable ? ` data-k="${c.k}" tabindex="0" title="sort by ${c.label}"` : ''}${
+        sortable ? ` aria-sort="${active ? (sort.dir > 0 ? 'ascending' : 'descending') : 'none'}"` : ''}>${c.label}${arrow}</th>`;
+    }).join('');
+    $('thead').querySelectorAll('th[data-k]').forEach((th) => {
+      const go = () => {
+        const c = COLS.find((x) => x.k === th.dataset.k);
+        if (sort.k === c.k) sort.dir = -sort.dir;
+        else sort = { k: c.k, dir: c.type === 'num' ? -1 : 1 };
+        drawHead(); render();
+      };
+      th.addEventListener('click', go);
+      th.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+    });
+  }
+
+  function filtered() {
+    const terms = $('q').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const p = $('fParticipant').value, o = $('fObject').value;
+    const gt = $('onlyGt').checked, ft = $('onlyFeat').checked;
+    return rows.filter((r) => {
+      if (p && r.participant !== p) return false;
+      if (o && !r.objects.includes(o)) return false;
+      if (gt && !r.have_gt) return false;
+      if (ft && !r.feat) return false;
+      return terms.every((t) => r.hay.includes(t));
+    });
+  }
+
+  function render() {
+    const col = COLS.find((c) => c.k === sort.k) || COLS[0];
+    const out = filtered().sort((a, b) => {
+      const va = col.get(a), vb = col.get(b);
+      if (va == null && vb == null) return a.seq < b.seq ? -1 : 1;
+      if (va == null) return 1;                       // missing values sort last either way
+      if (vb == null) return -1;
+      if (va === vb) return a.seq < b.seq ? -1 : 1;
+      return (va < vb ? -1 : 1) * sort.dir;
+    });
+    $('tbody').innerHTML = out.length
+      ? out.map((r) => `<tr class="${r.feat ? 'feat' : ''}">${COLS.map((c) => c.cell(r)).join('')}</tr>`).join('')
+      : `<tr><td colspan="${COLS.length}" class="miss">No recording matches these filters.</td></tr>`;
+    $('count').innerHTML = `Showing <strong>${out.length}</strong> of <strong>${rows.length}</strong> Aria recordings` +
+      (out.length ? ` · <strong>${out.filter((r) => r.have_gt).length}</strong> of them with ground truth` +
+                    ` · <strong>${out.filter((r) => r.feat).length}</strong> featured.` : '.');
+  }
+
+  function fail(msg) {
+    $('partsNote').textContent = msg;
+    $('posters').innerHTML = `<p class="miss">${esc(msg)}</p>`;
+    $('count').textContent = '';
+    $('tbody').innerHTML = `<tr><td colspan="${COLS.length}" class="miss">${esc(msg)}</td></tr>`;
+  }
+
+  HOT3D.index().then((ix) => {
+    rows = ix.sequences.filter((r) => r.device === 'Aria').map((r) => Object.assign({}, r, {
+      feat: FEATURED.includes(r.seq),
+      hay: `${r.seq} ${r.participant} ${r.objects.join(' ')}`.toLowerCase(),
+    }));
+
+    /* ---- totals, all counted from the rows above ---- */
+    const withGt = rows.filter((r) => r.have_gt);
+    const frames = withGt.reduce((n, r) => n + (r.rgb_frames || 0), 0);
+    const minutes = rows.reduce((n, r) => n + r.duration_s, 0) / 60;
+    const parts = new Set(rows.map((r) => r.participant));
+    const objs = new Set(rows.flatMap((r) => r.objects));
+    const gb = rows.reduce((n, r) => n + r.vrs_gb, 0);
+    $('fRec').textContent = f.n(rows.length);
+    $('fMin').textContent = minutes.toFixed(0);
+    $('fFrames').textContent = f.n(frames);
+    $('kFrames').textContent = `RGB frames, ${f.n(withGt.length)} annotated rec.`;
+    $('kFrames').title = `rgb_frames is only released for the ${withGt.length} annotated recordings; ` +
+      `the other ${rows.length - withGt.length} carry no frame count.`;
+    $('fPart').textContent = parts.size;
+    $('fObj').textContent = objs.size;
+    $('fGt').textContent = f.n(withGt.length);
+    $('fVrs').textContent = gb.toFixed(0);
+
+    /* ---- which release parts are present, stated from the flags rather than assumed ---- */
+    const missing = PARTS.filter((p) => rows.some((r) => !r.has[p.k]));
+    const names = PARTS.map((p) => p.short).join(', ');
+    $('partsNote').innerHTML = missing.length
+      ? `Not every recording ships every part: ${esc(missing.map((p) => p.short).join(', '))} ` +
+        `${missing.length === 1 ? 'is' : 'are'} missing from some rows — see the Parts column.`
+      : `All ${rows.length} Aria recordings ship all ${PARTS.length} release parts (${esc(names)}), so the Parts column ` +
+        `below is full on every row. The index marks ${f.n(withGt.length)} of them as carrying released hand and ` +
+        `object pose ground truth; for the other ${rows.length - withGt.length} — the benchmark's test split — those ` +
+        `poses are withheld, which is why their RGB frame count and QA pass rate are blank below.`;
+
+    /* ---- featured poster strip ---- */
+    const byseq = new Map(rows.map((r) => [r.seq, r]));
+    $('posters').innerHTML = FEATURED.map((s) => {
+      const r = byseq.get(s);
+      if (!r) return '';
+      return `<a class="poster" href="sequence.html#${esc(s)}">
+        <img src="media/${esc(s)}_poster.jpg" width="704" height="704" loading="eager" decoding="async"
+             alt="RGB frame from recording ${esc(s)}">
+        <span class="cap"><span class="id">${esc(s)}</span><br>
+        <span class="sub">${esc(r.participant)} · ${f.clock(r.duration_s)} · ${r.objects.length} objects</span></span>
+      </a>`;
+    }).join('');
+
+    /* ---- filter menus, built from the data ---- */
+    const count = (arr) => arr.reduce((m, v) => m.set(v, (m.get(v) || 0) + 1), new Map());
+    const pc = count(rows.map((r) => r.participant));
+    $('fParticipant').insertAdjacentHTML('beforeend', [...pc.keys()].sort()
+      .map((p) => `<option value="${esc(p)}">${esc(p)} (${pc.get(p)})</option>`).join(''));
+    const oc = count(rows.flatMap((r) => r.objects));
+    $('fObject').insertAdjacentHTML('beforeend', [...oc.keys()].sort()
+      .map((o) => `<option value="${esc(o)}">${esc(o)} (${oc.get(o)})</option>`).join(''));
+
+    const quest = ix.sequences.filter((r) => r.device === 'Quest3').length;
+    $('questNote').textContent = `The same HOT3D release also holds ${quest} Quest 3 recordings of the ` +
+      `same scenes and objects; this site covers the Aria half only, and none of the figures here include them.`;
+
+    ['q', 'fParticipant', 'fObject', 'onlyGt', 'onlyFeat'].forEach((id) =>
+      $(id).addEventListener('input', render));
+    $('reset').addEventListener('click', () => {
+      $('q').value = ''; $('fParticipant').value = ''; $('fObject').value = '';
+      $('onlyGt').checked = false; $('onlyFeat').checked = false;
+      render();
+    });
+
+    drawHead();
+    render();
+  }).catch((e) => fail(`Could not load data/index.json (${e.message}). The table needs that file; nothing on this page is hard-coded.`));
+})();
+</script>
+</body>
+</html>

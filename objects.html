@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Objects · HOT3D Aria</title>
+<meta name="description" content="The 33 rigid objects of HOT3D as 3D models, with their measurements, how many recordings each appears in, and how far each one travels in the twelve featured Aria recordings.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+<style>
+  .gal { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(212px, 1fr)); }
+  .ocard { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px 12px; }
+  .prev { position: relative; aspect-ratio: 4 / 3; background: var(--surface-2); border-radius: 8px; overflow: hidden; margin-bottom: 9px; }
+  .prev canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .prev .pnote {
+    position: absolute; left: 0; right: 0; bottom: 6px; text-align: center;
+    font-family: var(--mono); font-size: 10.5px; color: var(--muted); pointer-events: none;
+  }
+  .ohead { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }
+  .ohead h3 { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+  .okv { margin: 8px 0; display: grid; gap: 2px; font-size: 12.5px; }
+  .okv > div { display: flex; justify-content: space-between; gap: 10px; }
+  .okv dt { color: var(--muted); }
+  .okv dd { margin: 0; }
+  .bar { height: 5px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--c-object); }
+  td .bar { min-width: 76px; }
+  .ocard .note { font-size: 11.5px; margin-top: 5px; }
+  tr.dim td:first-child { color: var(--ink-2); }
+  th[data-sorted]::after { content: " ▾"; color: var(--muted); }
+  th[data-sorted="asc"]::after { content: " ▴"; color: var(--muted); }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div class="page-head">
+    <p class="eyebrow">Object library · BOP-format models</p>
+    <h1>The 33 objects, their models, and how much each one is handled</h1>
+    <p class="lede">Every HOT3D recording puts a handful of these objects on a table. The release
+    ships one rigid mesh per object and a motion-capture pose track for it in every annotated
+    recording. This page shows the meshes themselves, what they measure, how often each appears,
+    and how much each one actually moves.</p>
+  </div>
+
+  <p class="loading" id="status">reading data/objects.json and data/index.json …</p>
+  <div class="warn-box" id="err" hidden></div>
+
+  <section class="figs" id="figs" aria-label="Library at a glance"></section>
+
+  <h2>Gallery</h2>
+  <p>Drag inside a preview to rotate it (two fingers on a touch screen). A model is fetched and
+  rendered only when its card comes into view, and is released again when it scrolls well clear,
+  so the page never holds all 33 meshes at once. Each preview is framed to its own model's
+  bounding box so that the model fills the card, so apparent size says nothing about real size —
+  compare the quoted diagonals instead.</p>
+  <div class="row" id="galCtl">
+    <label class="field">sort by
+      <select id="galSort">
+        <option value="aria">Aria recordings</option>
+        <option value="all">all recordings</option>
+        <option value="name">name</option>
+        <option value="diag">size (diagonal)</option>
+        <option value="faces_released">faces in the released model</option>
+      </select>
+    </label>
+    <span class="note" id="galNote"></span>
+  </div>
+  <div class="gal" id="gal"></div>
+
+  <h2>The library, measured</h2>
+  <p>One row per object. <span class="mono">Aria</span> and <span class="mono">all</span> count the
+  recordings the object appears in — Aria-only, and Aria plus Quest3. Size is the bounding extent of
+  the released mesh. Click a column heading to sort.</p>
+  <div class="table-wrap">
+    <table id="libTbl">
+      <thead><tr id="libHead"></tr></thead>
+      <tbody id="libBody"></tbody>
+    </table>
+  </div>
+  <p class="note" id="compactNote"></p>
+
+  <h2>Motion in the twelve featured recordings</h2>
+  <p>Twelve Aria recordings are served here with their full per-frame payloads, and between them
+  they cover all 33 objects. For each object below: how far its ground-truth position track runs,
+  the same figure per minute of recording, the share of frames in which it has a pose at all, and
+  the share in which the release also reports it as visible in the RGB image. Travel is summed
+  frame to frame over <em>consecutive annotated frames only</em>: a gap in the pose track is left
+  open, never crossed in one straight jump, so for a partly annotated object the figure is a lower
+  bound. It also accumulates annotation noise, so an object that never leaves the table still reads
+  a little above zero; treat small values as "stationary", not as an exact distance. Visible means
+  the released per-frame visibility ratio for the RGB box is above zero — the release also emits a
+  box for frames where the object is inside the image but fully occluded, and those do not count
+  here. (The payload's own <span class="mono">travel_m</span> field joins consecutive annotated
+  samples straight across gaps, which inflates partly annotated tracks, so it is not used.)</p>
+  <p class="loading" id="mstat">reading the twelve featured payloads …</p>
+  <div class="table-wrap">
+    <table id="motTbl">
+      <thead><tr id="motHead"></tr></thead>
+      <tbody id="motBody"></tbody>
+    </table>
+  </div>
+  <p class="note" id="mnote"></p>
+</main>
+
+<script>
+HOT3D.init();
+
+/* The 3D gallery lives in a module below; it waits on this promise so that the cards exist
+   before three.js starts observing them. If the data never loads, it resolves anyway. */
+let cardsBuilt;
+window.galleryReady = new Promise((res) => { cardsBuilt = res; });
+
+const $ = (id) => document.getElementById(id);
+const F = HOT3D.fmt;
+const cm = (m, d = 1) => (m * 100).toFixed(d);
+
+let LIB = null, IX = null;
+
+/* ---------- a small sortable table ---------- */
+
+function sortable(headRow, bodyEl, cols, rows, key, desc) {
+  let sortKey = key, sortDesc = desc;
+  headRow.innerHTML = cols.map((c) => {
+    const cls = [c.num ? 'num' : '', c.sortless ? 'no-sort' : ''].filter(Boolean).join(' ');
+    return `<th data-k="${c.k}"${cls ? ` class="${cls}"` : ''} title="${c.title || ''}">${c.label}</th>`;
+  }).join('');
+  const draw = () => {
+    const col = cols.find((c) => c.k === sortKey) || cols[0];
+    const sorted = rows.slice().sort((a, b) => {
+      const x = a[sortKey], y = b[sortKey];
+      const c = (typeof x === 'string') ? x.localeCompare(y) : (x - y);
+      return sortDesc ? -c : c;
+    });
+    bodyEl.innerHTML = sorted.map((r) => `<tr>${cols.map((c) =>
+      `<td${c.num ? ' class="num"' : ''}>${c.cell(r)}</td>`).join('')}</tr>`).join('');
+    headRow.querySelectorAll('th').forEach((th) => {
+      if (th.dataset.k === col.k) th.dataset.sorted = sortDesc ? 'desc' : 'asc';
+      else delete th.dataset.sorted;
+    });
+  };
+  headRow.addEventListener('click', (e) => {
+    const th = e.target.closest('th');
+    if (!th) return;
+    const c = cols.find((x) => x.k === th.dataset.k);
+    if (!c || c.sortless) return;
+    if (sortKey === c.k) sortDesc = !sortDesc;
+    else { sortKey = c.k; sortDesc = !!c.num; }
+    draw();
+  });
+  draw();
+  return { draw, rows };
+}
+
+/* ---------- top figures ---------- */
+
+function renderFigs() {
+  const o = LIB.objects;
+  const ariaRec = IX.totals.aria;
+  const ariaRows = IX.sequences.filter((r) => r.device === 'Aria');
+  const perRec = ariaRows.reduce((s, r) => s + r.objects.length, 0) / ariaRows.length;
+  const diag = o.map((x) => x.diagonal_m);
+  const figs = [
+    [F.n(o.length), 'objects in the library'],
+    [F.n(o.reduce((s, x) => s + x.aria_recordings, 0)), `object appearances across ${F.n(ariaRec)} Aria recordings`],
+    [perRec.toFixed(1), 'objects per Aria recording, on average'],
+    [`${cm(Math.min(...diag))}–${cm(Math.max(...diag))}`, 'cm diagonal, smallest to largest'],
+    [`${F.n(Math.round(o.reduce((s, x) => s + x.faces_released, 0) / 1000))}k`, 'faces in the released meshes'],
+    [`${o.reduce((s, x) => s + x.mb_after, 0).toFixed(0)} MB`, `models served here (${o.reduce((s, x) => s + x.mb_before, 0).toFixed(0)} MB as released)`],
+  ];
+  $('figs').innerHTML = figs.map(([n, k]) =>
+    `<div class="fig"><div class="n">${n}</div><div class="k">${k}</div></div>`).join('');
+}
+
+/* ---------- gallery ---------- */
+
+function renderGallery() {
+  const ariaRec = IX.totals.aria;
+  $('gal').innerHTML = LIB.objects.map((o) => {
+    const ext = o.extent_m.map((v) => cm(v)).join(' × ');
+    const share = o.aria_recordings / ariaRec;
+    return `<article class="ocard" data-uid="${o.uid}">
+      <div class="prev" data-uid="${o.uid}"><canvas></canvas><span class="pnote">preview loads when visible</span></div>
+      <div class="ohead"><h3>${o.name}</h3><span class="pill">BOP ${o.bop_uid}</span></div>
+      <dl class="okv">
+        <div><dt>diagonal</dt><dd class="mono">${F.cm(o.diagonal_m)}</dd></div>
+        <div><dt>extent</dt><dd class="mono">${ext} cm</dd></div>
+        <div><dt>recordings</dt><dd class="mono">${o.aria_recordings} Aria / ${o.recordings} all</dd></div>
+      </dl>
+      <div class="bar"><i style="width:${(100 * share).toFixed(1)}%"></i></div>
+      <div class="note">appears in ${F.pct(share, 0)} of the ${F.n(ariaRec)} Aria recordings</div>
+    </article>`;
+  }).join('');
+  $('galNote').textContent = `${LIB.objects.length} models, ${LIB.objects.reduce((s, x) => s + x.mb_after, 0).toFixed(0)} MB in total — only the visible ones are fetched`;
+
+  $('galSort').addEventListener('change', (e) => {
+    const k = e.target.value;
+    const val = { aria: (o) => -o.aria_recordings, all: (o) => -o.recordings, name: (o) => o.name,
+                  diag: (o) => -o.diagonal_m, faces_released: (o) => -o.faces_released }[k];
+    const order = LIB.objects.slice().sort((a, b) => {
+      const x = val(a), y = val(b);
+      return typeof x === 'string' ? x.localeCompare(y) : x - y;
+    });
+    const gal = $('gal');
+    for (const o of order) gal.append(gal.querySelector(`.ocard[data-uid="${o.uid}"]`));
+  });
+}
+
+/* ---------- the library table ---------- */
+
+function renderLibTable() {
+  const cols = [
+    { k: 'name', label: 'object', cell: (r) => r.name },
+    { k: 'bop', label: 'BOP', num: true, cell: (r) => `<span class="mono">${r.bop}</span>` },
+    { k: 'aria', label: 'Aria rec.', num: true, title: 'Aria recordings containing this object', cell: (r) => F.n(r.aria) },
+    { k: 'all', label: 'all rec.', num: true, title: 'Aria + Quest3 recordings', cell: (r) => F.n(r.all) },
+    { k: 'diag', label: 'diagonal cm', num: true, cell: (r) => cm(r.diag) },
+    { k: 'ext', label: 'extent cm', num: true, title: 'bounding extent of the released mesh', cell: (r) => r.extStr },
+    { k: 'faces_released', label: 'faces released', num: true, cell: (r) => F.n(r.faces_released) },
+    { k: 'faces', label: 'faces served', num: true, title: 'after decimation for the web', cell: (r) => F.n(r.faces) },
+    { k: 'mb_before', label: 'MB released', num: true, cell: (r) => r.mb_before.toFixed(2) },
+    { k: 'mb_after', label: 'MB served', num: true, cell: (r) => r.mb_after.toFixed(2) },
+  ];
+  const rows = LIB.objects.map((o) => ({
+    name: o.name, bop: Number(o.bop_uid), aria: o.aria_recordings, all: o.recordings,
+    diag: o.diagonal_m, ext: Math.max(...o.extent_m), extStr: o.extent_m.map((v) => cm(v, 1)).join('×'),
+    faces_released: o.faces_released, faces: o.faces, mb_before: o.mb_before, mb_after: o.mb_after,
+  }));
+  sortable($('libHead'), $('libBody'), cols, rows, 'aria', true);
+
+  const cut = LIB.objects.filter((o) => o.faces < o.faces_released);
+  const dec = cut.length;
+  const tex = LIB.objects.filter((o) => o.textures_before.length).length;
+  const mbB = LIB.objects.reduce((s, x) => s + x.mb_before, 0);
+  const mbA = LIB.objects.reduce((s, x) => s + x.mb_after, 0);
+  /* the face cap is read back off the data rather than quoted: it is the largest served count
+     among the models that were decimated at all */
+  const geom = dec
+    ? `geometry decimated only where it exceeded ${F.n(Math.max(...cut.map((o) => o.faces)))} ` +
+      `faces (${dec} of ${LIB.objects.length} models), otherwise untouched`
+    : 'geometry left exactly as released in every model';
+  $('compactNote').innerHTML =
+    `Compaction for the web: textures resampled to ${LIB.texture_max_px} px on the long side ` +
+    `(${tex} of ${LIB.objects.length} models carry any texture) and ${geom} — ` +
+    `${mbB.toFixed(0)} MB of released models become ${mbA.toFixed(0)} MB served here. Every ` +
+    `measurement on this page (extent, diagonal, released faces and size) is of the released model.`;
+}
+
+/* ---------- motion across the twelve featured payloads ---------- */
+
+/* The featured recordings are the twelve that ship a full per-frame payload under data/seq/. */
+const FEATURED = ['P0001_4bf4e21a', 'P0002_65085bfc', 'P0003_ebdc6ff7', 'P0009_e71e2f24',
+  'P0010_573b2de6', 'P0010_8ff3e5c4', 'P0011_2255f410', 'P0011_72efb935', 'P0012_130a66e1',
+  'P0014_1fdca00e', 'P0015_cc5dfd13', 'P0015_e7458eb3'];
+
+async function loadMotion() {
+  const agg = new Map();
+  let read = 0, failed = 0;
+  const take = (s) => {
+    for (const o of s.objects) {
+      let a = agg.get(o.name);
+      if (!a) agg.set(o.name, a = { name: o.name, recs: 0, travel: 0, secs: 0, frames: 0, pose: 0, seen: 0, boxed: 0, top: -1, topSeq: '' });
+      /* The payload's travel_m joins consecutive annotated samples, so a gap in the pose track is
+         crossed as one straight jump: on holder_gray (posed in 2.8% of frames) that reads eight
+         times the distance actually annotated. pathLength leaves gaps open instead. */
+      const travel = HOT3D.pathLength(HOT3D.f32(o.T, 3));
+      /* A box row exists whenever the object is inside the image; vis is the released visibility
+         ratio, and vis == 0 means in frame but fully occluded. Count only vis > 0 as visible. */
+      const box = (o.boxes && o.boxes.rgb) || null;
+      let seen = 0;
+      if (box && box.vis) { const v = HOT3D.f32(box.vis); for (let i = 0; i < v.length; i++) if (v[i] > 0) seen += 1; }
+      a.recs += 1;
+      a.travel += travel;
+      a.secs += s.duration_s;
+      a.frames += s.F;
+      a.pose += o.frames_with_pose;
+      a.seen += seen;
+      a.boxed += box ? (box.frames_seen || 0) : 0;
+      if (travel > a.top) { a.top = travel; a.topSeq = s.seq; }
+    }
+  };
+
+  /* Each payload is several MB and only a handful of scalars per object are needed here, so the
+     parsed payload is dropped as soon as it has been folded in rather than kept in the cache. */
+  const work = FEATURED.slice();
+  const worker = async () => {
+    while (work.length) {
+      const seq = work.shift();
+      try {
+        const r = await fetch(`data/seq/${seq}.json`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        take(await r.json());
+      } catch (e) { failed += 1; }
+      read += 1;
+      $('mstat').textContent = `reading the twelve featured payloads … ${read} of ${FEATURED.length}`;
+      drawMotion(agg, read, failed, false);
+    }
+  };
+  await Promise.all([worker(), worker()]);
+  drawMotion(agg, read, failed, true);
+}
+
+let motTable = null, motMax = 1;
+function drawMotion(agg, read, failed, done) {
+  const rows = [...agg.values()].map((a) => ({
+    name: a.name, recs: a.recs, travel: a.travel,
+    rate: a.travel / (a.secs / 60), pose: a.pose / a.frames, seen: a.seen / a.frames,
+    seenN: a.seen, boxedN: a.boxed, top: a.top, topSeq: a.topSeq,
+  }));
+  if (!rows.length) {
+    if (done) {
+      $('mstat').className = 'warn-box';
+      $('mstat').textContent =
+        `None of the ${FEATURED.length} featured payloads could be read, so the table below is ` +
+        `empty. It needs data/seq/<recording>.json to be served alongside this page.`;
+    }
+    return;
+  }
+  motMax = Math.max(...rows.map((r) => r.rate), 1e-6);
+  const cols = [
+    { k: 'name', label: 'object', cell: (r) => r.name },
+    { k: 'recs', label: 'rec.', num: true, title: 'featured recordings containing this object', cell: (r) => r.recs },
+    { k: 'travel', label: 'travel m', num: true, title: 'path length of the ground-truth position track over consecutive annotated frames, summed over those recordings; gaps are not bridged', cell: (r) => r.travel.toFixed(1) },
+    { k: 'rate', label: 'm / min', num: true, title: 'travel divided by the running time of those recordings', cell: (r) => r.rate.toFixed(2) },
+    { k: 'bar', label: '', sortless: true, title: 'm / min, relative to the fastest object', cell: (r) => `<span class="bar" style="display:block"><i style="width:${(100 * r.rate / motMax).toFixed(1)}%"></i></span>` },
+    { k: 'pose', label: 'frames posed', num: true, title: 'frames with an object pose, over the frames of those recordings', cell: (r) => F.pct(r.pose, 1) },
+    { k: 'seen', label: 'frames visible (RGB)', num: true, title: 'frames whose released RGB visibility ratio is above zero, over the frames of those recordings', cell: (r) => F.pct(r.seen, 1) },
+    { k: 'top', label: 'busiest recording', sortless: true, cell: (r) => `<span class="mono">${F.seq(r.topSeq)}</span> <span class="note">${Math.max(r.top, 0).toFixed(1)} m</span>` },
+  ];
+  if (motTable) { motTable.rows.length = 0; motTable.rows.push(...rows); motTable.draw(); }
+  else motTable = sortable($('motHead'), $('motBody'), cols, rows, 'rate', true);
+
+  if (!done) return;
+  $('mstat').hidden = true;
+  const by = rows.slice().sort((a, b) => b.rate - a.rate);
+  const withRate = (r) => `${r.name} (${r.rate.toFixed(2)})`;
+  const posed = (r) => Math.round(r.pose * 1000) / 10;   // compare on the figure the table prints
+  const handled = by.filter((r) => r.rate >= 3);
+  const still = by.filter((r) => r.rate < 1.5 && posed(r) >= 90);
+  const thin = rows.slice().sort((a, b) => a.pose - b.pose).filter((r) => posed(r) < 90);
+  const boxedN = rows.reduce((s, r) => s + r.boxedN, 0);
+  const seenN = rows.reduce((s, r) => s + r.seenN, 0);
+  $('mnote').innerHTML =
+    `${read - failed} of ${FEATURED.length} payloads read` +
+    (failed ? `; ${failed} could not be fetched, so those recordings are missing from the table` : '') +
+    `. The release emits an RGB box in ${F.n(boxedN)} object-frames across these recordings; ` +
+    `${F.n(boxedN - seenN)} of them (${F.pct((boxedN - seenN) / boxedN, 1)}) carry a visibility ` +
+    `ratio of 0 — in the image but fully occluded — and are not counted as visible above. ` +
+    `Taking 3 m/min as the line for "handled": ${handled.map(withRate).join(', ')}. ` +
+    `Effectively stationary — posed in at least 90% of frames and still under 1.5 m/min: ` +
+    `${still.map(withRate).join(', ')}. ` +
+    (thin.length
+      ? `Partly annotated, posed in fewer than 90% of frames: ${thin.map((r) => `${r.name} (${F.pct(r.pose, 1)})`).join(', ')} — ` +
+        `their travel is a lower bound and their per-minute figure reads low for that reason, not because they sat still.`
+      : 'Every object is posed in at least 90% of the frames of the recordings it appears in.');
+}
+
+/* ---------- boot ---------- */
+
+(async function main() {
+  try {
+    const [lib, ix] = await Promise.all([HOT3D.json('data/objects.json'), HOT3D.index()]);
+    LIB = lib; IX = ix;
+    renderFigs();
+    renderGallery();
+    renderLibTable();
+    $('status').hidden = true;
+  } catch (e) {
+    $('status').hidden = true;
+    const box = $('err');
+    box.hidden = false;
+    box.textContent = `The object library could not be read (${e.message}). The gallery and the ` +
+      `table below need data/objects.json and data/index.json to be served alongside this page.`;
+  }
+  cardsBuilt();
+  try { await loadMotion(); } catch (e) {
+    $('mstat').textContent = `The featured payloads could not be read (${e.message}).`;
+  }
+})();
+
+/* If three.js never arrives, say so in the previews instead of leaving them promising a model. */
+setTimeout(() => {
+  if (window.previewsRunning) return;
+  document.querySelectorAll('.prev .pnote').forEach((n) => { n.textContent = '3D preview unavailable'; });
+}, 9000);
+</script>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+await window.galleryReady;
+
+const slots = [...document.querySelectorAll('.prev[data-uid]')];
+const note = (el, text) => { const n = el.querySelector('.pnote'); if (n) n.textContent = text; };
+if (!slots.length) throw new Error('no object cards');
+window.previewsRunning = true;
+
+/* One renderer for all 33 previews: each visible card is rendered into it and the result is
+   copied into that card's own 2D canvas, so only one WebGL context is ever created. */
+let renderer, envMap;
+try {
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true, powerPreference: 'low-power' });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setClearAlpha(0);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  pmrem.dispose();
+} catch (e) {
+  slots.forEach((s) => note(s, 'WebGL unavailable in this browser'));
+  throw e;
+}
+
+const loader = new GLTFLoader();
+const live = new Map();          // slot element -> {status, root, scene, cam, controls}
+const queue = [];
+let active = 0;
+const MAX_PARALLEL = 3;
+
+function want(el) {
+  if (live.has(el)) return;
+  live.set(el, { status: 'queued' });
+  queue.push(el);
+  note(el, 'loading model …');
+  pump();
+}
+
+function pump() {
+  while (active < MAX_PARALLEL && queue.length) {
+    const el = queue.shift();
+    const st = live.get(el);
+    if (!st || st.status !== 'queued') continue;
+    st.status = 'loading';
+    active += 1;
+    loader.loadAsync(`data/objects/${el.dataset.uid}.glb`).then((gltf) => {
+      if (live.get(el) !== st) { disposeTree(gltf.scene); return; }   // scrolled away while loading
+      build(el, st, gltf.scene);
+    }).catch(() => {
+      if (live.get(el) === st) note(el, 'model did not load');
+    }).finally(() => { active -= 1; pump(); });
+  }
+}
+
+function tidyMaterials(root) {
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    for (const m of (Array.isArray(o.material) ? o.material : [o.material])) {
+      if (!m) continue;
+      /* Models with no released texture arrive as the glTF default (white, fully metallic);
+         draw those as a neutral matte grey so the geometry is readable in both themes. */
+      if (!m.map) { if (m.color) m.color.setHex(0xb2b9c0); m.metalness = 0.06; m.roughness = 0.72; }
+      m.side = THREE.DoubleSide;
+    }
+  });
+}
+
+function build(el, st, root) {
+  tidyMaterials(root);
+  const box = new THREE.Box3().setFromObject(root);
+  const size = box.getSize(new THREE.Vector3());
+  const centre = box.getCenter(new THREE.Vector3());
+  const radius = Math.max(size.length() / 2, 1e-9);
+  root.position.sub(centre);
+
+  const scene = new THREE.Scene();
+  scene.environment = envMap;
+  scene.add(root);
+  const key = new THREE.DirectionalLight(0xffffff, 1.5);
+  key.position.set(1, 1.6, 1.2);
+  scene.add(key, new THREE.AmbientLight(0xffffff, 0.18));
+
+  const fov = 32;
+  const cam = new THREE.PerspectiveCamera(fov, 4 / 3, radius / 60, radius * 60);
+  const dir = new THREE.Vector3(0.72, 0.52, 0.94).normalize();
+  cam.position.copy(dir.multiplyScalar(radius / Math.sin((fov * Math.PI) / 360) * 1.02));
+  cam.lookAt(0, 0, 0);
+
+  const canvas = el.querySelector('canvas');
+  const controls = new OrbitControls(cam, canvas);
+  controls.enableZoom = false;
+  controls.enablePan = false;
+  controls.touches.ONE = -1;                       // one finger keeps scrolling the page
+  controls.touches.TWO = THREE.TOUCH.DOLLY_ROTATE; // two fingers rotate
+  canvas.style.touchAction = 'pan-y';
+  controls.target.set(0, 0, 0);
+  controls.addEventListener('change', () => schedule(el));
+  controls.update();
+
+  Object.assign(st, { status: 'live', root, scene, cam, controls });
+  note(el, 'drag to rotate');
+  schedule(el);
+}
+
+function drop(el) {
+  const st = live.get(el);
+  if (!st) return;
+  live.delete(el);
+  if (st.controls) st.controls.dispose();
+  if (st.root) disposeTree(st.root);
+  const canvas = el.querySelector('canvas');
+  const ctx = canvas.getContext('2d');
+  if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+  note(el, 'preview loads when visible');
+}
+
+function disposeTree(root) {
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    if (o.geometry) o.geometry.dispose();
+    for (const m of (Array.isArray(o.material) ? o.material : [o.material])) {
+      if (!m) continue;
+      for (const k in m) { const v = m[k]; if (v && v.isTexture) v.dispose(); }
+      m.dispose();
+    }
+  });
+}
+
+/* Painting: batched into one animation frame, and only for cards that asked for it. */
+const dirty = new Set();
+let raf = 0;
+function schedule(el) { dirty.add(el); if (!raf) raf = requestAnimationFrame(flush); }
+function flush() {
+  raf = 0;
+  const todo = [...dirty];
+  dirty.clear();
+  for (const el of todo) paint(el);
+}
+
+function paint(el) {
+  const st = live.get(el);
+  if (!st || st.status !== 'live') return;
+  const canvas = el.querySelector('canvas');
+  const w = Math.max(el.clientWidth, 1), h = Math.max(el.clientHeight, 1);
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const pw = Math.floor(w * dpr), ph = Math.floor(h * dpr);
+  if (canvas.width !== pw || canvas.height !== ph) { canvas.width = pw; canvas.height = ph; }
+  if (renderer.domElement.width !== pw || renderer.domElement.height !== ph) renderer.setSize(w, h, false);
+  if (Math.abs(st.cam.aspect - w / h) > 1e-4) { st.cam.aspect = w / h; st.cam.updateProjectionMatrix(); }
+  renderer.render(st.scene, st.cam);
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, pw, ph);
+  ctx.drawImage(renderer.domElement, 0, 0, pw, ph);
+}
+
+const io = new IntersectionObserver((entries) => {
+  for (const e of entries) {
+    if (e.isIntersecting) want(e.target);
+    else drop(e.target);
+  }
+}, { rootMargin: '300px 0px', threshold: 0 });
+slots.forEach((s) => io.observe(s));
+
+let resizeTimer = 0;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { for (const el of live.keys()) schedule(el); }, 150);
+});
+</script>
+</body>
+</html>

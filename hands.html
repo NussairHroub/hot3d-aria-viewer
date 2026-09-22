@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hands · HOT3D Aria</title>
+<meta name="description" content="Everything the HOT3D release says about hands: the UmeTrack and MANO wrist poses and parameters, how often each hand is annotated, and how far the two models' wrist frames sit apart.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+<style>
+  .chart { width: 100%; height: 152px; }
+  .strip { width: 100%; height: 268px; }
+  .lg { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; font-size: 12.5px; color: var(--muted); margin: 0 0 8px; }
+  .lg span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .lg i { width: 22px; border-top: 2px solid currentColor; display: inline-block; }
+  .sw { width: 11px; height: 11px; border-radius: 3px; display: inline-block; border: 1px solid var(--line-2); }
+  .bars { display: grid; gap: 10px; margin-top: 4px; }
+  .barrow { display: grid; grid-template-columns: 124px 1fr; gap: 10px; align-items: center; }
+  .barrow .lab { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; }
+  .barpair { display: grid; gap: 3px; }
+  .bar { display: flex; height: 11px; border-radius: 3px; overflow: hidden; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
+  .bar b { display: block; height: 100%; font-size: 0; }
+  .s-both { background: var(--c-hand); }
+  .s-l { background: color-mix(in srgb, var(--c-hand) 55%, transparent); }
+  .s-r { background: repeating-linear-gradient(45deg, var(--c-hand) 0 2px, transparent 2px 5px); }
+  .panel { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
+  .ctl { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 14px; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; font-size: 13.5px; margin: 8px 0 0; }
+  .kv dt { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+  .kv dd { margin: 0; }
+  @media (max-width: 560px) {
+    .barrow { grid-template-columns: 100px 1fr; }
+    .panel { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div class="page-head">
+    <p class="eyebrow">Hand annotation</p>
+    <h1>Two hand models, one wrist pose per frame</h1>
+    <p class="lede">HOT3D ships each hand twice: once as a UmeTrack skeleton and once as MANO. Both
+    are fitted to the same motion-capture ground truth, so they are posed on exactly the same
+    frames — but their wrist frames are defined differently, which shows up as a standing offset of
+    roughly a hand's width. This page reads the twelve featured Aria payloads and reports what is
+    actually in them.</p>
+  </div>
+
+  <section class="figs" aria-label="Hand annotation at a glance">
+    <div class="fig"><div class="n" id="fFrames">—</div><div class="k">posed hand-frames, 12 recordings</div></div>
+    <div class="fig"><div class="n" id="fUme">—</div><div class="k">UmeTrack joint angles</div></div>
+    <div class="fig"><div class="n" id="fMano">—</div><div class="k">MANO pose coefficients</div></div>
+    <div class="fig"><div class="n" id="fOff">—</div><div class="k">median UmeTrack–MANO wrist gap</div></div>
+  </section>
+  <p class="loading" id="status">Loading the twelve featured payloads…</p>
+
+  <h2>What the release ships for a hand</h2>
+  <div class="cards">
+    <div class="card">
+      <h3>UmeTrack</h3>
+      <div class="meta">A wrist transform plus a vector of joint angles for the hand skeleton. In
+      this payload: <span class="mono">wrist_t</span> (F×3, metres), <span class="mono">wrist_q</span>
+      (F×4, w·x·y·z), <span class="mono">params</span> (F×<span id="nU">22</span>, radians) and a
+      per-frame <span class="mono">conf</span>.</div>
+      <dl class="kv" id="kvU"></dl>
+    </div>
+    <div class="card">
+      <h3>MANO</h3>
+      <div class="meta">A wrist transform plus pose coefficients of the MANO hand model. In this
+      payload: <span class="mono">wrist_t</span>, <span class="mono">wrist_q</span>,
+      <span class="mono">params</span> (F×<span id="nM">15</span>) and <span class="mono">conf</span>.
+      The release pairs these with per-participant MANO shape parameters (betas); the betas are a
+      property of the person, not of the frame, and this site's payload does not carry them.</div>
+      <dl class="kv" id="kvM"></dl>
+    </div>
+  </div>
+
+  <div class="warn-box" style="margin-top:14px">
+    <p style="margin:0">This payload carries the <strong>wrist pose and the model parameters</strong>,
+    not expanded finger landmarks. Turning the <span id="nU2">22</span> angles or the
+    <span id="nM2">15</span> coefficients into 3D fingertips
+    needs the corresponding hand model and the per-participant hand shape, neither of which is
+    included here. Nothing on this page should be read as a finger-joint position.</p>
+  </div>
+
+  <h2>Per-recording availability</h2>
+  <p id="availProse">A hand is annotated on a frame when the released trajectory has an entry for it;
+  everywhere else the payload stores NaN. Separately, the release gives a 2D box per hand per camera,
+  present on the frames where that hand falls inside that camera's view. The two are independent
+  channels rather than one nested inside the other, and the counts below measure them separately.</p>
+  <div class="lg" style="margin-top:12px">
+    <span><i style="color:var(--c-hand)"></i>upper bar: wrist pose</span>
+    <span><i style="color:var(--c-hand);opacity:.55"></i>lower bar: hand box in RGB</span>
+    <span><span class="sw s-both"></span>both hands</span>
+    <span><span class="sw s-l"></span>left only</span>
+    <span><span class="sw s-r"></span>right only</span>
+    <span><span class="sw" style="background:var(--surface-2)"></span>neither</span>
+  </div>
+  <div class="bars" id="bars"></div>
+
+  <div class="table-wrap" style="margin-top:18px">
+    <table id="tbl">
+      <thead><tr>
+        <th class="no-sort">Recording</th>
+        <th class="no-sort">Part.</th>
+        <th class="no-sort num">Frames</th>
+        <th class="no-sort num">Left posed</th>
+        <th class="no-sort num">Right posed</th>
+        <th class="no-sort num">Both</th>
+        <th class="no-sort num">Left box, RGB</th>
+        <th class="no-sort num">Right box, RGB</th>
+        <th class="no-sort num">L · R gap</th>
+      </tr></thead>
+      <tbody id="tbody"><tr><td colspan="9" class="loading">waiting for payloads…</td></tr></tbody>
+    </table>
+  </div>
+  <p class="note">Posed counts come from <span class="mono">hands.&lt;side&gt;.umetrack.frames</span>;
+  MANO has the same count on every hand of every featured recording, so one column covers both. “Both”
+  is the release mask <span class="mono">masks.hand_pose_available.rgb</span>, which is 1 exactly on
+  the frames where both hands are posed. The last column is the median UmeTrack–MANO wrist distance
+  for that recording, left and right.</p>
+
+  <h2>One recording in detail</h2>
+  <div class="ctl">
+    <label class="field">Recording
+      <select id="seqSel"></select>
+    </label>
+    <span class="note" id="selMeta"></span>
+  </div>
+
+  <div class="panel">
+    <figure>
+      <div class="lg">
+        <span><i style="color:var(--c-hand)"></i>left wrist</span>
+        <span><i style="color:var(--c-hand);border-top-style:dashed"></i>right wrist</span>
+        <span><i style="color:var(--c-headset);border-top-style:dotted"></i>headset</span>
+      </div>
+      <canvas class="chart" id="cHeight"></canvas>
+      <figcaption id="capHeight">Wrist height.</figcaption>
+    </figure>
+    <figure>
+      <div class="lg">
+        <span><i style="color:var(--c-hand)"></i>left wrist</span>
+        <span><i style="color:var(--c-hand);border-top-style:dashed"></i>right wrist</span>
+      </div>
+      <canvas class="chart" id="cSpeed"></canvas>
+      <figcaption id="capSpeed">Wrist speed.</figcaption>
+    </figure>
+    <figure>
+      <div class="lg"><span><i style="color:var(--c-hand)"></i>left wrist to right wrist</span></div>
+      <canvas class="chart" id="cSep"></canvas>
+      <figcaption id="capSep">Distance between the two wrists.</figcaption>
+    </figure>
+    <figure>
+      <div class="lg">
+        <span><i style="color:var(--c-hand)"></i>left hand</span>
+        <span><i style="color:var(--c-hand);border-top-style:dashed"></i>right hand</span>
+      </div>
+      <canvas class="chart" id="cOff"></canvas>
+      <figcaption id="capOff">UmeTrack versus MANO wrist position.</figcaption>
+    </figure>
+  </div>
+
+  <h3>Why the two models disagree</h3>
+  <p id="offProse">The gap between the UmeTrack wrist and the MANO wrist is not a tracking error. The
+  two models anchor the wrist at different places in the hand and orient the frame differently, so a
+  roughly constant offset is expected. What matters is that it is steady: the trace above stays flat
+  for as long as the hand is annotated.</p>
+
+  <h2>UmeTrack joint angles</h2>
+  <p>UmeTrack stores the hand pose as a vector of joint angles alongside the wrist transform. The
+  payload keeps them in release order as an unnamed vector, so the rows below are numbered rather
+  than named; each row is one angle over the whole recording.</p>
+  <div class="ctl">
+    <span class="toggles" role="group" aria-label="Which hand">
+      <button class="btn" type="button" id="hL" aria-pressed="false">Left hand</button>
+      <button class="btn" type="button" id="hR" aria-pressed="true">Right hand</button>
+    </span>
+  </div>
+  <figure>
+    <canvas class="strip" id="cStrip"></canvas>
+    <figcaption id="capStrip">Joint-angle strip.</figcaption>
+  </figure>
+
+  <h2>Across the twelve recordings</h2>
+  <div class="figs" aria-label="Availability summary">
+    <div class="fig"><div class="n" id="fMedL">—</div><div class="k">median left-hand pose coverage</div></div>
+    <div class="fig"><div class="n" id="fMedR">—</div><div class="k">median right-hand pose coverage</div></div>
+    <div class="fig"><div class="n" id="fMedBL">—</div><div class="k">median left box in RGB</div></div>
+    <div class="fig"><div class="n" id="fMedBR">—</div><div class="k">median right box in RGB</div></div>
+  </div>
+  <p id="worstProse" class="note" style="margin-top:14px">Worst cases load with the payloads.</p>
+  <p class="note" id="idxProse">Beyond these twelve, <span class="mono">data/index.json</span> records
+  which Aria recordings list hand files and which are flagged as ground truth; those counts load with
+  the page.</p>
+</main>
+
+<script>
+HOT3D.init();
+
+const SEQS = ['P0001_4bf4e21a','P0002_65085bfc','P0003_ebdc6ff7','P0009_e71e2f24',
+              'P0010_573b2de6','P0010_8ff3e5c4','P0011_2255f410','P0011_72efb935',
+              'P0012_130a66e1','P0014_1fdca00e','P0015_cc5dfd13','P0015_e7458eb3'];
+const SIDES = ['left','right'];
+const $ = (id) => document.getElementById(id);
+const F1 = HOT3D.fmt;
+const S = { recs: [], by: new Map(), sel: null, hand: 'right' };
+const PARAMS = new Map();   // decoded UmeTrack angle blocks, keyed seq/side
+
+/* ---------- small helpers ---------- */
+
+function median(a) {
+  const v = [];
+  for (const x of a) if (Number.isFinite(x)) v.push(x);
+  if (!v.length) return NaN;
+  v.sort((p, q) => p - q);
+  const h = v.length >> 1;
+  return v.length % 2 ? v[h] : (v[h - 1] + v[h]) / 2;
+}
+function finiteMask(rows) {
+  const m = new Uint8Array(rows.length);
+  for (let i = 0; i < rows.length; i++) m[i] = Number.isFinite(rows[i][0]) ? 1 : 0;
+  return m;
+}
+function count(m, v) { let n = 0; for (let i = 0; i < m.length; i++) if (m[i] === v) n++; return n; }
+function pairCounts(a, b) {                 // both / a-only / b-only / neither
+  let both = 0, ao = 0, bo = 0;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] && b[i]) both++; else if (a[i]) ao++; else if (b[i]) bo++;
+  }
+  return { both, ao, bo, none: a.length - both - ao - bo };
+}
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const num = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '—');
+
+/* ---------- payload -> the numbers this page needs ---------- */
+
+function prep(p) {
+  const rec = { seq: p.seq, participant: p.participant, F: p.F, dur: p.duration_s,
+                t: HOT3D.f32(p.t), hands: {}, payload: p };
+  rec.headZ = new Float32Array(rec.F);
+  const H = HOT3D.f32(p.headset.T, 3);
+  for (let i = 0; i < rec.F; i++) rec.headZ[i] = H[i][2];
+  for (const side of SIDES) {
+    const h = p.hands[side];
+    const u = HOT3D.f32(h.umetrack.wrist_t, 3);
+    const m = HOT3D.f32(h.mano.wrist_t, 3);
+    const box = HOT3D.f32(h.boxes.rgb.xyxy, 4);
+    const off = new Float32Array(rec.F);
+    for (let i = 0; i < rec.F; i++) off[i] = 100 * HOT3D.dist(u[i], m[i]);
+    const confU = HOT3D.f32(h.umetrack.conf), confM = HOT3D.f32(h.mano.conf);
+    rec.hands[side] = {
+      u, m, off,
+      posed: finiteMask(u), boxed: finiteMask(box),
+      nPose: h.umetrack.frames, nPoseMano: h.mano.frames,
+      nBox: h.boxes.rgb.frames_seen,
+      nParamsU: h.umetrack.n_params, nParamsM: h.mano.n_params,
+      confUFinite: count2(confU), confMFinite: count2(confM),
+      confUMin: Math.min.apply(null, Array.from(confU).filter(Number.isFinite)),
+      confUMax: Math.max.apply(null, Array.from(confU).filter(Number.isFinite)),
+      medOff: median(off),
+    };
+  }
+  rec.bothMask = HOT3D.u8(p.masks.hand_pose_available.rgb);
+  rec.nBoth = count(rec.bothMask, 1);
+  return rec;
+}
+function count2(arr) { let n = 0; for (let i = 0; i < arr.length; i++) if (Number.isFinite(arr[i])) n++; return n; }
+
+/* derived per-frame series, computed when a recording is selected */
+function heightSeries(rec, side) {
+  const W = rec.hands[side].u, v = new Float32Array(rec.F);
+  for (let i = 0; i < rec.F; i++) v[i] = W[i][2];
+  return v;
+}
+function speedSeries(rec, side) {
+  const W = rec.hands[side].u, t = rec.t, v = new Float32Array(rec.F);
+  v[0] = NaN;
+  for (let i = 1; i < rec.F; i++) {
+    const dt = t[i] - t[i - 1];
+    v[i] = dt > 0 ? HOT3D.dist(W[i], W[i - 1]) / dt : NaN;
+  }
+  return v;
+}
+function sepSeries(rec) {
+  const L = rec.hands.left.u, R = rec.hands.right.u, v = new Float32Array(rec.F);
+  for (let i = 0; i < rec.F; i++) v[i] = 100 * HOT3D.dist(L[i], R[i]);
+  return v;
+}
+
+/* ---------- drawing ---------- */
+
+function drawCharts() {
+  const rec = S.sel;
+  if (!rec) return;
+  const hand = HOT3D.channel.hand(), head = HOT3D.channel.headset();
+  const t = rec.t;
+
+  const hl = heightSeries(rec, 'left'), hr = heightSeries(rec, 'right');
+  HOT3D.linePlot($('cHeight'), t, [
+    { v: rec.headZ, color: head, dash: [1, 3], width: 1 },
+    { v: hl, color: hand, width: 1.6 },
+    { v: hr, color: hand, dash: [5, 4], width: 1.6 },
+  ], { fmt: (v) => v.toFixed(2) });
+  $('capHeight').innerHTML = `Wrist height in the recording's gravity-aligned world frame, metres on
+    the up axis, ${esc(rec.seq)}. Zero is the release's world origin, not a floor or a table, so
+    read differences rather than absolute values; the headset's own height is drawn dotted for
+    scale. Median left ${F1.m(median(hl))}, right ${F1.m(median(hr))} — the headset runs
+    ${F1.cm(median(rec.headZ) - median(hl), 0)} above the left wrist. Gaps are frames with no hand
+    pose.`;
+
+  const sl = speedSeries(rec, 'left'), sr = speedSeries(rec, 'right');
+  HOT3D.linePlot($('cSpeed'), t, [
+    { v: sl, color: hand, width: 1.4 },
+    { v: sr, color: hand, dash: [5, 4], width: 1.4 },
+  ], { fmt: (v) => v.toFixed(2), ...zeroTo(maxFinite(sl), maxFinite(sr)) });
+  $('capSpeed').innerHTML = `Wrist speed, metres per second, from the frame-to-frame difference of
+    the UmeTrack wrist position at ${rec.payload.fps.toFixed(0)} fps, ${esc(rec.seq)}. Median left
+    ${num(median(sl))} m/s, right ${num(median(sr))} m/s; peak ${num(maxFinite(sl))} and
+    ${num(maxFinite(sr))} m/s. The first frame after a gap has no speed, because the previous
+    position is missing.`;
+
+  const sep = sepSeries(rec);
+  HOT3D.linePlot($('cSep'), t, [{ v: sep, color: hand, width: 1.5 }], { fmt: (v) => v.toFixed(0) });
+  $('capSep').innerHTML = `Distance between the two UmeTrack wrists, centimetres, ${esc(rec.seq)}.
+    Defined only on the ${F1.n(rec.nBoth)} frames where both hands are posed
+    (${F1.pct(rec.nBoth / rec.F)} of the recording). Median ${num(median(sep), 1)} cm, range
+    ${num(minFinite(sep), 1)}–${num(maxFinite(sep), 1)} cm.`;
+
+  const ol = rec.hands.left.off, or_ = rec.hands.right.off;
+  HOT3D.linePlot($('cOff'), t, [
+    { v: ol, color: hand, width: 1.5 },
+    { v: or_, color: hand, dash: [5, 4], width: 1.5 },
+  ], { fmt: (v) => v.toFixed(1), ...zeroTo(maxFinite(ol), maxFinite(or_)) });
+  const ml = rec.hands.left.medOff, mr = rec.hands.right.medOff;
+  $('capOff').innerHTML = `Distance between the UmeTrack wrist and the MANO wrist of the same hand,
+    centimetres, ${esc(rec.seq)}. Median ${num(ml)} cm on the left and ${num(mr)} cm on the right;
+    the left trace stays inside ${num(minFinite(ol))}–${num(maxFinite(ol))} cm and the right inside
+    ${num(minFinite(or_))}–${num(maxFinite(or_))} cm. The two models place and orient the wrist frame
+    differently, so this offset is a convention difference, not an error in either track.`;
+
+  $('offProse').innerHTML = `The gap between the UmeTrack wrist and the MANO wrist is not a tracking
+    error: the two models anchor the wrist at a different point in the hand and orient its frame
+    differently, so a near-constant offset is expected. In ${esc(rec.seq)} the left-hand gap holds a
+    median of ${num(ml)} cm with 90% of frames inside ${num(pct(ol, .05))}–${num(pct(ol, .95))} cm,
+    and the right-hand gap a median of ${num(mr)} cm inside
+    ${num(pct(or_, .05))}–${num(pct(or_, .95))} cm — a spread of about
+    ${num(pct(ol, .95) - pct(ol, .05), 1)} cm around an offset near ${num(ml, 0)} cm. Subtract it as
+    a convention; do not read it as either model being wrong. The offset also differs by side and
+    between recordings, so it is worth measuring per hand rather than assuming one constant.`;
+}
+function pct(a, p) {
+  const v = [];
+  for (const x of a) if (Number.isFinite(x)) v.push(x);
+  if (!v.length) return NaN;
+  v.sort((q, r) => q - r);
+  return v[Math.min(v.length - 1, Math.max(0, Math.round((v.length - 1) * p)))];
+}
+function maxFinite(a) { let m = -Infinity; for (const v of a) if (Number.isFinite(v) && v > m) m = v; return m; }
+function minFinite(a) { let m = Infinity; for (const v of a) if (Number.isFinite(v) && v < m) m = v; return m; }
+/* linePlot only honours an explicit range when BOTH ends are given, so a zero baseline has to
+   carry its own top. */
+function zeroTo(...tops) {
+  const hi = Math.max(...tops.filter(Number.isFinite));
+  return { min: 0, max: Number.isFinite(hi) && hi > 0 ? hi * 1.08 : 1 };
+}
+/* "20", "20 and 21", "20, 21 and 22" */
+function listJoin(a) {
+  if (a.length <= 1) return a.join('');
+  return `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`;
+}
+function boxNoPose(rec, side) {
+  const p = rec.hands[side].posed, b = rec.hands[side].boxed;
+  let n = 0;
+  for (let i = 0; i < p.length; i++) if (b[i] && !p[i]) n++;
+  return n;
+}
+
+function drawStrip() {
+  const rec = S.sel, cv = $('cStrip');
+  if (!rec) return;
+  const side = S.hand;
+  const h = rec.payload.hands[side].umetrack;
+  const n = h.n_params;
+  const key = `${rec.seq}/${side}`;
+  if (!PARAMS.has(key)) PARAMS.set(key, HOT3D.f32(h.params, n));
+  const P = PARAMS.get(key);
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const w = cv.clientWidth || 600, ht = cv.clientHeight || 260;
+  cv.width = w * dpr; cv.height = ht * dpr;
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, ht);
+
+  const padL = 26, padR = 6, padT = 4, padB = 40;     // padB holds time axis + colour bar
+  const plotW = Math.max(w - padL - padR, 10);
+  const rowH = Math.max(4, Math.floor((ht - padT - padB) / n));
+  const gridH = rowH * n;
+
+  let lo = Infinity, hi = -Infinity, posed = 0;
+  const constant = [];
+  for (let j = 0; j < n; j++) {
+    let cl = Infinity, ch = -Infinity;
+    for (let i = 0; i < rec.F; i++) {
+      const v = P[i][j];
+      if (!Number.isFinite(v)) continue;
+      if (v < cl) cl = v; if (v > ch) ch = v;
+    }
+    if (Number.isFinite(cl)) { lo = Math.min(lo, cl); hi = Math.max(hi, ch); if (ch - cl < 1e-6) constant.push(j); }
+  }
+  for (let i = 0; i < rec.F; i++) if (Number.isFinite(P[i][0])) posed++;
+  if (!Number.isFinite(lo)) { lo = 0; hi = 1; }
+
+  ctx.fillStyle = HOT3D.css('--surface-2');
+  ctx.fillRect(padL, padT, plotW, gridH);
+
+  const hand = HOT3D.channel.hand();
+  ctx.fillStyle = hand;
+  const span = Math.max(hi - lo, 1e-6);
+  /* A column covers a range of frames, not one sampled frame: average the finite values in the
+     range so short gaps are not aliased away, and leave the column blank only when every frame it
+     covers is un-posed. */
+  const sum = new Float64Array(n), cnt = new Int32Array(n);
+  for (let px = 0; px < plotW; px++) {
+    const i0 = Math.floor(rec.F * px / plotW);
+    const i1 = Math.max(i0 + 1, Math.floor(rec.F * (px + 1) / plotW));
+    sum.fill(0); cnt.fill(0);
+    for (let i = i0; i < i1 && i < rec.F; i++) {
+      const row = P[i];
+      for (let j = 0; j < n; j++) {
+        const v = row[j];
+        if (Number.isFinite(v)) { sum[j] += v; cnt[j]++; }
+      }
+    }
+    for (let j = 0; j < n; j++) {
+      if (!cnt[j]) continue;
+      ctx.globalAlpha = 0.05 + 0.95 * (sum[j] / cnt[j] - lo) / span;
+      ctx.fillRect(padL + px, padT + j * rowH, 1, rowH);
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  ctx.strokeStyle = HOT3D.css('--line');
+  ctx.lineWidth = 1;
+  ctx.strokeRect(padL + .5, padT + .5, plotW - 1, gridH - 1);
+
+  ctx.font = `9px ${HOT3D.css('--mono') || 'monospace'}`;
+  ctx.fillStyle = HOT3D.css('--muted');
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (let j = 0; j < n; j++) {
+    if (rowH < 8 && j % 2) continue;
+    ctx.fillText(String(j), padL - 4, padT + j * rowH + rowH / 2);
+  }
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.font = `11px ${HOT3D.css('--mono') || 'monospace'}`;
+  const t = rec.t;
+  for (let g = 0; g <= 4; g++) {
+    const frac = g / 4;
+    ctx.fillText(`${t[Math.round((rec.F - 1) * frac)].toFixed(0)}s`, padL + plotW * frac, padT + gridH + 4);
+  }
+
+  // colour bar: the same alpha ramp, labelled in degrees
+  const cbY = padT + gridH + 22, cbH = 9, cbW = Math.min(180, plotW);
+  ctx.fillStyle = HOT3D.css('--surface-2');
+  ctx.fillRect(padL, cbY, cbW, cbH);
+  ctx.fillStyle = hand;
+  for (let px = 0; px < cbW; px++) {
+    ctx.globalAlpha = 0.05 + 0.95 * px / Math.max(cbW - 1, 1);
+    ctx.fillRect(padL + px, cbY, 1, cbH);
+  }
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = HOT3D.css('--muted');
+  ctx.font = `10px ${HOT3D.css('--mono') || 'monospace'}`;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText(`${(lo * 180 / Math.PI).toFixed(0)}°`, padL + cbW + 6, cbY + cbH / 2);
+  ctx.fillText(`${(hi * 180 / Math.PI).toFixed(0)}°`, padL + cbW + 46, cbY + cbH / 2);
+  ctx.fillStyle = HOT3D.css('--line-2');
+  ctx.fillRect(padL + cbW + 34, cbY + cbH / 2 - .5, 8, 1);
+
+  const cons = constant.length
+    ? `${constant.length === 1 ? 'Row' : 'Rows'} ${listJoin(constant)} ${constant.length === 1 ? 'does' : 'do'} not move at all in this recording.`
+    : 'Every row varies in this recording.';
+  const perCol = rec.F / plotW;
+  $('capStrip').innerHTML = `The ${n} UmeTrack joint angles of the ${side} hand in ${esc(rec.seq)},
+    one row per angle, time left to right. Colour is the angle itself on a scale shared by all
+    ${n} rows, ${(lo * 180 / Math.PI).toFixed(0)}° to ${(hi * 180 / Math.PI).toFixed(0)}°. This hand
+    carries no pose on ${F1.n(rec.F - posed)} of the ${F1.n(rec.F)} frames; each pixel column
+    averages the ${perCol < 1.5 ? 'frame' : `${perCol.toFixed(1)} frames`} it covers and is blank
+    only where all of them are un-posed, so a gap shorter than a column can be averaged away. ${cons} The
+    angles are released as a bare vector, so the row numbers are positions in that vector, not named
+    joints, and this strip is the parameter itself — not a finger position.`;
+}
+
+function drawAll() { try { drawCharts(); drawStrip(); } catch (e) { $('status').textContent = `Could not draw: ${e.message}`; } }
+
+/* ---------- tables and bars ---------- */
+
+function renderAvailability() {
+  const bars = $('bars'), rows = [];
+  bars.innerHTML = '';
+  for (const rec of S.recs) {
+    const pose = pairCounts(rec.hands.left.posed, rec.hands.right.posed);
+    const box = pairCounts(rec.hands.left.boxed, rec.hands.right.boxed);
+    const seg = (c) => `<b class="s-both" style="width:${100 * c.both / rec.F}%"></b>` +
+                       `<b class="s-l" style="width:${100 * c.ao / rec.F}%"></b>` +
+                       `<b class="s-r" style="width:${100 * c.bo / rec.F}%"></b>`;
+    const el = document.createElement('div');
+    el.className = 'barrow';
+    el.innerHTML = `<div class="lab" title="${esc(rec.seq)}">${esc(F1.seq(rec.seq))}</div>
+      <div class="barpair">
+        <div class="bar" title="wrist pose: both ${F1.pct(pose.both / rec.F, 0)}, left only ${F1.pct(pose.ao / rec.F, 0)}, right only ${F1.pct(pose.bo / rec.F, 0)}">${seg(pose)}</div>
+        <div class="bar" style="opacity:.55" title="hand box in RGB: both ${F1.pct(box.both / rec.F, 0)}, left only ${F1.pct(box.ao / rec.F, 0)}, right only ${F1.pct(box.bo / rec.F, 0)}">${seg(box)}</div>
+      </div>`;
+    bars.append(el);
+
+    const L = rec.hands.left, R = rec.hands.right;
+    rows.push(`<tr>
+      <td class="mono">${esc(F1.seq(rec.seq))}</td>
+      <td class="mono">${esc(rec.participant)}</td>
+      <td class="num">${F1.n(rec.F)}</td>
+      <td class="num">${F1.n(L.nPose)} · ${F1.pct(L.nPose / rec.F, 0)}</td>
+      <td class="num">${F1.n(R.nPose)} · ${F1.pct(R.nPose / rec.F, 0)}</td>
+      <td class="num">${F1.pct(rec.nBoth / rec.F, 0)}</td>
+      <td class="num">${F1.n(L.nBox)} · ${F1.pct(L.nBox / rec.F, 0)}</td>
+      <td class="num">${F1.n(R.nBox)} · ${F1.pct(R.nBox / rec.F, 0)}</td>
+      <td class="num">${num(L.medOff, 1)} · ${num(R.medOff, 1)} cm</td>
+    </tr>`);
+  }
+  $('tbody').innerHTML = rows.join('');
+}
+
+function renderSummary(ix) {
+  const all = [];
+  for (const rec of S.recs) for (const side of SIDES) {
+    all.push({ seq: rec.seq, side, pose: rec.hands[side].nPose / rec.F, box: rec.hands[side].nBox / rec.F,
+               off: rec.hands[side].medOff, n: rec.hands[side].nPose });
+  }
+  const pick = (side, key) => all.filter(r => r.side === side).map(r => r[key]);
+  $('fMedL').textContent = F1.pct(median(pick('left', 'pose')), 1);
+  $('fMedR').textContent = F1.pct(median(pick('right', 'pose')), 1);
+  $('fMedBL').textContent = F1.pct(median(pick('left', 'box')), 1);
+  $('fMedBR').textContent = F1.pct(median(pick('right', 'box')), 1);
+
+  const worstPose = all.slice().sort((a, b) => a.pose - b.pose).slice(0, 3);
+  const worstBox = all.slice().sort((a, b) => a.box - b.box).slice(0, 3);
+  const say = (r, k) => `${esc(F1.seq(r.seq))} ${r.side} (${F1.pct(r[k], 1)})`;
+  const offs = all.map(r => r.off);
+  const poses = all.map(r => r.pose).sort((a, b) => a - b);
+  const rightWider = S.recs.filter(r => r.hands.right.medOff > r.hands.left.medOff).length;
+  const medOffL = median(pick('left', 'off')), medOffR = median(pick('right', 'off'));
+  $('worstProse').innerHTML = `Lowest pose coverage: ${worstPose.map(r => say(r, 'pose')).join(', ')}.
+    Lowest box coverage in the RGB view: ${worstBox.map(r => say(r, 'box')).join(', ')}. Every other
+    hand of the ${all.length} is posed on at least ${F1.pct(poses[3], 1)} of its frames. The median
+    UmeTrack–MANO wrist gap over those ${all.length} hands is ${num(median(offs))} cm, ranging from
+    ${num(Math.min.apply(null, offs))} to ${num(Math.max.apply(null, offs))} cm; the right-hand gap
+    is the larger of the two in ${rightWider} of the ${S.recs.length} recordings
+    (median ${num(medOffL, 1)} cm left against ${num(medOffR, 1)} cm right), which is what a
+    per-side frame convention looks like.`;
+
+  /* pose and box are separate channels: neither count contains the other */
+  let bnpFrames = 0, bnpHands = 0, worstBnp = null;
+  const boxOverPose = [];
+  for (const rec of S.recs) for (const side of SIDES) {
+    const k = boxNoPose(rec, side);
+    if (k) { bnpHands++; bnpFrames += k; if (!worstBnp || k > worstBnp.k) worstBnp = { seq: rec.seq, side, k }; }
+    const h = rec.hands[side];
+    if (h.nBox > h.nPose) boxOverPose.push({ seq: rec.seq, side, box: h.nBox, pose: h.nPose });
+  }
+  const bigger = boxOverPose.length
+    ? `and on ${boxOverPose.length === 1 ? 'one hand' : `${boxOverPose.length} hands`} the box is
+       seen on more frames than the pose — ${boxOverPose.map(r => `${esc(F1.seq(r.seq))} ${r.side},
+       ${F1.n(r.box)} box frames against ${F1.n(r.pose)} posed`).join('; ')}. Neither count bounds
+       the other, so read the two bars below independently`
+    : 'though on these twelve the box count stays at or below the posed count for every hand';
+  $('availProse').innerHTML = `A hand is annotated on a frame when the released trajectory has an
+    entry for it; everywhere else the payload stores NaN. Separately, the release gives a 2D box per
+    hand per camera, present on the frames where that hand falls inside that camera's view. The two
+    are independent channels: across the twelve recordings the RGB box is present on
+    ${F1.n(bnpFrames)} frames that carry no wrist pose for the same hand
+    (${bnpHands} of the ${all.length} hands${worstBnp ? `, most of them in
+    ${esc(F1.seq(worstBnp.seq))} ${worstBnp.side}, ${F1.n(worstBnp.k)} frames` : ''}), ${bigger}.`;
+
+  const totalPosed = all.reduce((s, r) => s + r.n, 0);
+  $('fFrames').textContent = F1.n(totalPosed);
+  $('fOff').textContent = `${num(median(offs), 1)} cm`;
+
+  const setU = new Set(), setM = new Set();
+  for (const rec of S.recs) for (const side of SIDES) {
+    setU.add(rec.hands[side].nParamsU); setM.add(rec.hands[side].nParamsM);
+  }
+  const nParU = [...setU].sort((a, b) => a - b).join(' / ');
+  const nParM = [...setM].sort((a, b) => a - b).join(' / ');
+  $('fUme').textContent = nParU;
+  $('fMano').textContent = nParM;
+  $('nU').textContent = nParU;
+  $('nM').textContent = nParM;
+  $('nU2').textContent = nParU;
+  $('nM2').textContent = nParM;
+
+  let uconf = 0, uframes = 0, mconf = 0, sameFrames = true;
+  let cMin = Infinity, cMax = -Infinity;
+  for (const rec of S.recs) for (const side of SIDES) {
+    const h = rec.hands[side];
+    uconf += h.confUFinite; uframes += h.nPose; mconf += h.confMFinite;
+    if (h.nPose !== h.nPoseMano) sameFrames = false;
+    if (Number.isFinite(h.confUMin)) { cMin = Math.min(cMin, h.confUMin); cMax = Math.max(cMax, h.confUMax); }
+  }
+  const confRange = Number.isFinite(cMin)
+    ? (cMax - cMin < 5e-3 ? `constant ${cMin.toFixed(2)}` : `${cMin.toFixed(2)}–${cMax.toFixed(2)}`)
+    : 'no finite value';
+  $('kvU').innerHTML = `<dt>posed frames</dt><dd>${F1.n(uframes)} across the twelve</dd>
+    <dt>conf</dt><dd>present on ${F1.n(uconf)} of them, value ${confRange}</dd>
+    <dt>params</dt><dd>${nParU} angles per frame, radians</dd>`;
+  $('kvM').innerHTML = `<dt>posed frames</dt><dd>${sameFrames ? 'identical to UmeTrack, frame for frame' : 'differs from UmeTrack'}</dd>
+    <dt>conf</dt><dd>${mconf === 0 ? 'NaN on every frame — not carried' : `present on ${F1.n(mconf)} frames`}</dd>
+    <dt>params</dt><dd>${nParM} pose coefficients per frame</dd>`;
+
+  if (ix) {
+    const aria = ix.sequences.filter(r => r.device === 'Aria');
+    const ume = aria.filter(r => r.has && r.has.umetrack).length;
+    const mano = aria.filter(r => r.has && r.has.mano).length;
+    const gt = aria.filter(r => r.have_gt).length;
+    const both = ume === aria.length && mano === aria.length;
+    $('idxProse').innerHTML = `Beyond these twelve:
+      <span class="mono">data/index.json</span> marks
+      ${both ? `all ${F1.n(aria.length)} Aria recordings as listing both hand files`
+             : `${F1.n(ume)} Aria recordings as listing a UmeTrack file and ${F1.n(mano)} a MANO file`},
+      while ${F1.n(gt)} of them are flagged <span class="mono">have_gt</span> — the file flag records
+      what the release lists, not what it hands out, and the test split withholds its annotations.
+      The twelve featured here are all inside the ground-truth set, and every figure on this page is
+      theirs alone.`;
+  } else {
+    $('idxProse').innerHTML = `<span class="mono">data/index.json</span> did not load, so the
+      release-wide hand-file counts are not shown. Every other figure on this page comes from the
+      twelve payloads listed above.`;
+  }
+}
+
+/* ---------- wiring ---------- */
+
+function selectRec(seq) {
+  S.sel = S.by.get(seq);
+  const rec = S.sel;
+  $('selMeta').textContent = `${rec.participant} · ${F1.n(rec.F)} frames · ${F1.clock(rec.dur)} · ` +
+    `left posed ${F1.pct(rec.hands.left.nPose / rec.F, 1)}, right ${F1.pct(rec.hands.right.nPose / rec.F, 1)}`;
+  drawAll();
+}
+
+function setHand(side) {
+  S.hand = side;
+  $('hL').setAttribute('aria-pressed', String(side === 'left'));
+  $('hR').setAttribute('aria-pressed', String(side === 'right'));
+  drawStrip();
+}
+$('hL').addEventListener('click', () => setHand('left'));
+$('hR').addEventListener('click', () => setHand('right'));
+$('seqSel').addEventListener('change', (e) => selectRec(e.target.value));
+
+let rt;
+addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(drawAll, 160); });
+new MutationObserver(drawAll).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+if (matchMedia('(prefers-color-scheme: dark)').addEventListener) {
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawAll);
+}
+
+(async () => {
+  const status = $('status');
+  let done = 0;
+  const tick = () => { status.textContent = `Loading the twelve featured payloads… ${++done}/${SEQS.length}`; };
+  try {
+    const [ix, ...payloads] = await Promise.all([
+      HOT3D.index().catch(() => null),
+      ...SEQS.map(s => HOT3D.sequence(s).then(p => { tick(); return p; })),
+    ]);
+    S.recs = payloads.map(prep);
+    for (const rec of S.recs) S.by.set(rec.seq, rec);
+    $('seqSel').innerHTML = S.recs
+      .map(r => `<option value="${esc(r.seq)}">${esc(r.seq)} · ${esc(r.participant)}</option>`).join('');
+    renderAvailability();
+    renderSummary(ix);
+    const start = S.by.has('P0003_ebdc6ff7') ? 'P0003_ebdc6ff7' : S.recs[0].seq;
+    $('seqSel').value = start;
+    selectRec(start);
+    status.textContent = `Read ${SEQS.length} payloads: ` +
+      `${F1.n(S.recs.reduce((s, r) => s + r.F, 0))} frames, ` +
+      `${F1.clock(S.recs.reduce((s, r) => s + r.dur, 0))} of recording.`;
+  } catch (e) {
+    status.innerHTML = `<span style="color:var(--bad)">Could not load the payloads: ${esc(e.message)}.</span>
+      The figures below stay empty; the prose describes the release, not this page's numbers.`;
+    $('tbody').innerHTML = `<tr><td colspan="9">No data — ${esc(e.message)}</td></tr>`;
+  }
+})();
+</script>
+</body>
+</html>

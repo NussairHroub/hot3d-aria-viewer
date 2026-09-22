@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HOT3D Aria Viewer</title>
+<meta name="description" content="Interactive views of every signal in the Aria half of the HOT3D dataset: video, hand and object ground truth, headset trajectory, scene points, eye gaze and annotation quality.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+</head>
+<body>
+<main class="wrap">
+  <div class="page-head">
+    <p class="eyebrow">Meta Reality Labs · CVPR 2025</p>
+    <h1>Every signal in the Aria half of HOT3D, on one site</h1>
+    <p class="lede">HOT3D records people handling objects on a table while wearing Project Aria
+    glasses. Each recording carries three camera streams, motion-capture ground truth for both
+    hands and every object, the headset's own tracking, and per-frame quality masks. These pages
+    put each of those signals where you can look at it directly, rather than reading it out of a
+    CSV.</p>
+  </div>
+
+  <section class="figs" id="figs" aria-label="Dataset at a glance">
+    <div class="fig"><div class="n" id="fRec">198</div><div class="k">Aria recordings</div></div>
+    <div class="fig"><div class="n" id="fMin">390</div><div class="k">minutes</div></div>
+    <div class="fig"><div class="n" id="fFrames">480,375</div><div class="k">RGB frames</div></div>
+    <div class="fig"><div class="n" id="fPart">14</div><div class="k">participants</div></div>
+    <div class="fig"><div class="n" id="fObj">33</div><div class="k">rigid objects</div></div>
+    <div class="fig"><div class="n" id="fGt">136</div><div class="k">with released ground truth</div></div>
+  </section>
+
+  <h2>Start here</h2>
+  <div class="cards">
+    <a class="card" href="sequence.html">
+      <h3>Sequence viewer</h3>
+      <div class="meta">The video with the annotations drawn on it: object and hand boxes, gaze,
+      and the per-frame readout of everything the release knows about that instant.</div>
+      <div class="go">open →</div>
+    </a>
+    <a class="card" href="scene3d.html">
+      <h3>3D scene</h3>
+      <div class="meta">The same recording in world coordinates — scene points, the headset's path,
+      object poses and both wrists, playable on a timeline.</div>
+      <div class="go">open →</div>
+    </a>
+    <a class="card" href="recordings.html">
+      <h3>All 198 recordings</h3>
+      <div class="meta">Who recorded what, for how long, with which objects, and which parts of the
+      release are present. Sortable and filterable.</div>
+      <div class="go">open →</div>
+    </a>
+  </div>
+
+  <h2>One page per signal</h2>
+  <div class="cards">
+    <a class="card" href="hands.html">
+      <h3>Hands</h3>
+      <div class="meta">Both hand models the release ships — UmeTrack and MANO — their wrist
+      trajectories, how often each is available, and where they disagree.</div>
+      <div class="go">open →</div>
+    </a>
+    <a class="card" href="objects.html">
+      <h3>Objects</h3>
+      <div class="meta">The 33-object library as 3D models, with how much each one is used, how far
+      it travels, and how often it is actually visible.</div>
+      <div class="go">open →</div>
+    </a>
+    <a class="card" href="cameras.html">
+      <h3>Cameras</h3>
+      <div class="meta">The RGB and two monochrome cameras: stills from each, the fisheye
+      calibration as released, and how the rig is laid out.</div>
+      <div class="go">open →</div>
+    </a>
+    <a class="card" href="gaze.html">
+      <h3>Eye gaze</h3>
+      <div class="meta">Where the wearer looked: yaw and pitch traces, gaze depth, and how the
+      personalised calibration differs from the general one.</div>
+      <div class="go">open →</div>
+    </a>
+    <a class="card" href="quality.html">
+      <h3>Annotation quality</h3>
+      <div class="meta">The masks that say which frames are usable — QA pass, exposure, and whether
+      hands and objects are visible and posed.</div>
+      <div class="go">open →</div>
+    </a>
+    <a class="card" href="data.html">
+      <h3>About the data</h3>
+      <div class="meta">What a recording folder holds, what each file means, and exactly how these
+      pages were produced from it.</div>
+      <div class="go">open →</div>
+    </a>
+  </div>
+
+  <h2>What you are looking at</h2>
+  <p>Aria recordings carry one 1408×1408 RGB camera and two 640×480 monochrome SLAM cameras, all at
+  30 frames per second. The ground truth comes from a motion-capture system, so hand and object
+  poses are independent of anything estimated from these images — which is what makes the release
+  useful as a reference rather than only as training data.</p>
+  <p class="note">Twelve recordings are featured in full here, chosen so that all 33 objects and
+  nine participants appear; every page states which recordings its figures come from. The remaining
+  186 are listed with their metadata. Of the 198 Aria recordings, 136 ship hand and object ground
+  truth; the other 62 hold back annotations as the benchmark's test split.</p>
+</main>
+
+<script>
+HOT3D.init();
+HOT3D.index().then(ix => {
+  const t = ix.totals;
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('fRec', HOT3D.fmt.n(t.aria));
+  set('fMin', Math.round(t.aria_minutes));
+  set('fFrames', HOT3D.fmt.n(t.aria_rgb_frames));
+  set('fPart', t.participants);
+  set('fObj', t.objects);
+  set('fGt', HOT3D.fmt.n(ix.sequences.filter(r => r.device === 'Aria' && r.have_gt).length));
+}).catch(() => { /* the figures above are the released counts; leave them as written */ });
+</script>
+</body>
+</html>
