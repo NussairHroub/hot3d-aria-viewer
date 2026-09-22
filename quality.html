@@ -55,12 +55,16 @@
   <p class="note" id="figsNote">Reading data/index.json…</p>
 
   <h2>What each mask asserts</h2>
-  <p>The masks live in <code>masks.&lt;name&gt;.&lt;stream&gt;</code> of each sequence payload, one byte
-  per frame per stream: <strong>1</strong> the assertion holds, <strong>0</strong> it does not,
-  <strong>255</strong> the frame was not annotated on that stream at all. Pass rates on this page are
-  computed over annotated frames only, so a 255 never counts as a pass or as a failure. What a 0 means
-  in the world — an occluded hand, a dropped mocap marker, a blown-out exposure — is not recorded; only
-  the verdict is.</p>
+  <p>Each mask is <code>masks.&lt;name&gt;.&lt;stream&gt;</code>, one byte per frame per stream:
+  <strong>1</strong> the assertion holds, <strong>0</strong> it does not, <strong>255</strong> the frame
+  was not annotated on that stream at all. Pass rates on this page are computed over annotated frames
+  only, so a 255 never counts as a pass or as a failure. What a 0 means in the world — an occluded hand,
+  a dropped mocap marker, a blown-out exposure — is not recorded; only the verdict is.</p>
+  <p class="note">Five of the masks come from the sequence payload
+  <code>data/seq/&lt;SEQ&gt;.json</code> (CC BY-SA 4.0); the two hand masks,
+  <code>hand_visible</code> and <code>hand_pose_available</code>, come from the hand annotation file
+  <code>data/hands/&lt;SEQ&gt;.hands.json</code> read through <code>HOT3D.hands(seq)</code>, which is
+  licensed separately as CC BY-NC-SA 4.0 and is therefore kept in its own file.</p>
 
   <div class="table-wrap">
     <table class="defs">
@@ -72,7 +76,7 @@
       <tbody id="defsBody"></tbody>
     </table>
   </div>
-  <p class="note">The last column is computed from the twelve payloads: for every frame annotated on all
+  <p class="note">The last column is computed from the twelve featured recordings: for every frame annotated on all
   three streams, whether <code>rgb</code>, <code>slam_left</code> and <code>slam_right</code> carry the
   same value. The three pose masks are properties of the timestamp, not of a camera; the exposure and
   visibility masks are properties of one image and differ between streams.</p>
@@ -123,9 +127,9 @@
 
   <h2>The twelve featured recordings compared</h2>
   <p>Pass rate per mask on the stream selected above, worst first. Click a column to sort by it. Cells
-  are tinted by how much of the recording the mask rejects. The masks exist only inside the sequence
-  payloads, so this table is filled in as all twelve are read.</p>
-  <p class="loading" id="sweepNote">Reading the twelve sequence payloads…</p>
+  are tinted by how much of the recording the mask rejects. The masks exist only inside the per-recording
+  files, so this table is filled in as all twelve payloads and their hand files are read.</p>
+  <p class="loading" id="sweepNote">Reading the twelve sequence payloads and hand files…</p>
   <div class="table-wrap">
     <table id="heatTable">
       <thead><tr id="heatHead"></tr></thead>
@@ -165,22 +169,28 @@ const FEATURED = [
   'P0012_130a66e1', 'P0014_1fdca00e', 'P0015_cc5dfd13', 'P0015_e7458eb3',
 ];
 const STREAMS = ['rgb', 'slam_left', 'slam_right'];
+/* Five masks ship in the sequence payload; the two hand masks ship in the separately licensed
+   hand file, data/hands/<SEQ>.hands.json, read through HOT3D.hands(seq). `src` says which. */
 const MASKS = [
-  { k: 'qa_pass', s: 'qa_pass',
+  { k: 'qa_pass', s: 'qa_pass', src: 'seq',
     d: 'the release accepts this frame on this stream — the flag that decides whether a frame is used at all.' },
-  { k: 'good_exposure', s: 'exposure',
+  { k: 'good_exposure', s: 'exposure', src: 'seq',
     d: 'this stream’s image is exposed well enough to be read.' },
-  { k: 'hand_visible', s: 'hand vis',
+  { k: 'hand_visible', s: 'hand vis', src: 'hands',
     d: 'an annotated hand appears in this stream’s image.' },
-  { k: 'object_visible', s: 'obj vis',
+  { k: 'object_visible', s: 'obj vis', src: 'seq',
     d: 'an annotated object appears in this stream’s image.' },
-  { k: 'hand_pose_available', s: 'hand pose',
+  { k: 'hand_pose_available', s: 'hand pose', src: 'hands',
     d: 'hand pose ground truth exists at this frame’s timestamp.' },
-  { k: 'headset_pose_available', s: 'head pose',
+  { k: 'headset_pose_available', s: 'head pose', src: 'seq',
     d: 'headset pose ground truth exists at this frame’s timestamp.' },
-  { k: 'object_pose_available', s: 'obj pose',
+  { k: 'object_pose_available', s: 'obj pose', src: 'seq',
     d: 'object pose ground truth exists at this frame’s timestamp.' },
 ];
+/** what to say about a mask this page could not read, which depends on which file it lives in */
+const missingWhy = (m, ex) => (m.src === 'hands' && ex && !ex.handsOk)
+  ? 'hand mask file not read'
+  : 'no mask for this stream';
 
 const state = { seq: 'P0011_72efb935', stream: 'rgb', sortKey: 'qa_pass', sortDir: 1,
                 hover: null, histHover: null };
@@ -205,16 +215,22 @@ function statOf(a, fps) {
            longest, at, longestS: longest / (fps || 30) };
 }
 
-/** pull the masks out of a payload; the rest of the payload is not kept */
-function extract(p) {
+/** pull the masks out of the two payloads; the rest of either payload is not kept.
+ *  `h` is the hand file (HOT3D.hands) and may be null if it could not be read — the five
+ *  sequence masks are still shown, and the two hand masks are reported as unread, never as passing. */
+function extract(p, h) {
   const out = { seq: p.seq, F: p.F, fps: p.fps, dur: p.duration_s, participant: p.participant,
-                objects: p.summary ? p.summary.objects : null, stats: {}, disagree: {}, arrays: null };
+                objects: p.summary ? p.summary.objects : null,
+                handsOk: !!(h && h.masks && h.F === p.F),
+                stats: {}, disagree: {}, arrays: null };
+  const from = { seq: (p.masks || {}), hands: (out.handsOk ? h.masks : {}) };
   const arrays = {};
   for (const m of MASKS) {
     out.stats[m.k] = {}; arrays[m.k] = {};
     const per = {};
+    const holder = from[m.src];
     for (const st of STREAMS) {
-      const b = p.masks && p.masks[m.k] ? p.masks[m.k][st] : null;
+      const b = holder && holder[m.k] ? holder[m.k][st] : null;
       if (!b) { out.stats[m.k][st] = null; arrays[m.k][st] = null; continue; }
       const a = HOT3D.u8(b);
       out.stats[m.k][st] = statOf(a, p.fps);
@@ -298,9 +314,9 @@ function drawStrip() {
     ctx.fillText(short ? m.s : m.k, 2, y + barH / 2);
 
     const a = current.arrays[m.k][stream];
-    if (!a) {                                   // the payload carries no mask for this stream
+    if (!a) {                                   // no mask here: absent from its file, or that file failed
       ctx.fillStyle = HOT3D.css('--muted');
-      ctx.fillText('no mask for this stream in the payload', padL, y + barH / 2);
+      ctx.fillText(`${missingWhy(m, current)} — no verdict is drawn`, padL, y + barH / 2);
       return;
     }
     const st = current.stats[m.k][stream];
@@ -371,22 +387,23 @@ function readoutText() {
     return;
   }
   const i = state.hover;
-  const failing = [], missing = [];
+  const failing = [], missing = [], unread = [];
   for (const m of MASKS) {
     const a = current.arrays[m.k][stream];
-    if (!a) { missing.push(m.k); continue; }
+    if (!a) { unread.push(m.k); continue; }   // the file holding this mask was not read
     if (a[i] === 255) missing.push(m.k);
     else if (a[i] === 0) failing.push(m.k);
   }
   const bits = [`t ${HOT3D.fmt.clock(current.t[i])}`, `frame ${i}`, stream];
   // a 255 is neither a pass nor a failure, so a frame with no annotation at all must not be
   // reported as passing; only the masks that carry a verdict here can be spoken for
-  const known = MASKS.length - missing.length;
+  const known = MASKS.length - missing.length - unread.length;
   if (failing.length) bits.push(`fail: ${failing.join(', ')}`);
   else if (!known) bits.push('not annotated on this stream — no mask carries a verdict here');
   else if (known === MASKS.length) bits.push(`all ${MASKS.length} masks pass`);
   else bits.push(`the ${known} mask${known === 1 ? '' : 's'} annotated here pass`);
   if (missing.length && known) bits.push(`not annotated: ${missing.join(', ')}`);
+  if (unread.length) bits.push(`not read: ${unread.join(', ')}`);
   r.textContent = bits.join(' · ');
 }
 
@@ -400,7 +417,7 @@ function renderRates() {
   for (const m of MASKS) {
     const st = current.stats[m.k][stream];
     if (!st) {
-      rows.push(`<tr><td>${m.s}</td><td colspan="3" class="note">no mask for this stream</td></tr>`);
+      rows.push(`<tr><td>${m.s}</td><td colspan="3" class="note">${missingWhy(m, current)}</td></tr>`);
       continue;
     }
     naByMask.push([m.k, st.na]);
@@ -422,7 +439,7 @@ function renderRates() {
   const note = el('naNote');
   const arrs = MASKS.map(m => current.arrays[m.k][stream]).filter(Boolean);
   if (!arrs.length) {
-    note.textContent = 'This payload carries no masks for this stream.';
+    note.textContent = 'No mask for this stream could be read for this recording.';
   } else {
     let naAny = 0, naAll = 0;
     for (let i = 0; i < current.F; i++) {
@@ -440,6 +457,10 @@ function renderRates() {
         `${hit.length} of the ${arrs.length} masks ${hit.length === 1 ? 'is' : 'are'} affected, ` +
         `at most ${HOT3D.fmt.n(maxNa)} frame${maxNa === 1 ? '' : 's'} each.`
       : `Every frame on this stream is annotated for all ${arrs.length} masks.`;
+    if (!current.handsOk) {
+      note.textContent += ` The two hand masks are not counted here: data/hands/${current.seq}.hands.json ` +
+        `could not be read, so no verdict is claimed for them.`;
+    }
   }
 
   const rel = qaRelation(current.arrays, stream, current.F);
@@ -468,9 +489,14 @@ async function loadSelected(seq) {
   el('readout').textContent = `Loading ${seq} payload…`;
   el('rateBody').innerHTML = '<tr><td colspan="4" class="loading">reading…</td></tr>';
   try {
-    const p = await HOT3D.sequence(seq);
+    // the five non-hand masks come from the sequence payload, the two hand masks from the
+    // separately licensed hand file; a missing hand file must not sink the rest of the panel
+    const [p, h] = await Promise.all([
+      HOT3D.sequence(seq),
+      HOT3D.hands(seq).catch(() => null),
+    ]);
     if (token !== loadToken) return;
-    const ex = extract(p);
+    const ex = extract(p, h);
     ex.t = HOT3D.f32(p.t);
     current = ex;
     if (!sweep.has(seq)) { sweep.set(seq, ex); renderHeat(); }
@@ -500,21 +526,26 @@ async function sweepAll() {
   const one = async (seq) => {
     try {
       // the selected recording is already cached by the runtime; the rest are read once and
-      // released, so only the masks stay in memory rather than twelve whole payloads
-      let p;
-      if (seq === state.seq) { p = await HOT3D.sequence(seq); }
-      else {
-        const r = await fetch(`data/seq/${seq}.json`);
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        p = await r.json();
+      // released, so only the masks stay in memory rather than twelve whole payloads.
+      // Two files per recording now: the payload, and the separately licensed hand file.
+      if (!sweep.has(seq)) {
+        const get = async (path) => {
+          const r = await fetch(path);
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        };
+        const [p, h] = seq === state.seq
+          ? await Promise.all([HOT3D.sequence(seq), HOT3D.hands(seq).catch(() => null)])
+          : await Promise.all([get(`data/seq/${seq}.json`),
+                               get(`data/hands/${seq}.hands.json`).catch(() => null)]);
+        sweep.set(seq, extract(p, h));
       }
-      if (!sweep.has(seq)) sweep.set(seq, extract(p));
     } catch (e) {
       failed++; sweep.set(seq, { seq, failed: true });
     }
     done++;
     note.textContent = done < FEATURED.length
-      ? `Reading the twelve sequence payloads — ${done} of ${FEATURED.length}…`
+      ? `Reading the twelve sequence payloads and hand files — ${done} of ${FEATURED.length}…`
       : '';
     renderHeat();
   };
@@ -522,9 +553,15 @@ async function sweepAll() {
     while (queue.length) await one(queue.shift());
   });
   await Promise.all(workers);
+  const noHands = [...sweep.values()].filter(ex => !ex.failed && !ex.handsOk).length;
   note.textContent = failed
     ? `${failed} of ${FEATURED.length} payloads could not be read; the table shows the rest.`
-    : `Computed from all ${FEATURED.length} featured payloads (${HOT3D.fmt.n(totalFrames())} frames).`;
+    : `Computed from all ${FEATURED.length} featured recordings (${HOT3D.fmt.n(totalFrames())} frames), ` +
+      `reading each payload and its hand file.`;
+  if (noHands) {
+    note.textContent += ` The hand file is missing for ${noHands} of them, so their two hand-mask ` +
+      `columns are left empty rather than filled with a guess.`;
+  }
   note.className = 'note';
   renderDefs();
   closingExample();
@@ -557,10 +594,14 @@ function totalFrames() {
 function renderDefs() {
   const ready = [...sweep.values()].filter(ex => !ex.failed);
   el('defsBody').innerHTML = MASKS.map(m => {
+    // a hand mask can only be compared in the recordings whose hand file was read
+    const have = ready.filter(ex => m.src !== 'hands' || ex.handsOk);
     let cell = '<span class="loading">reading payloads…</span>';
-    if (ready.length) {
+    if (ready.length && !have.length) {
+      cell = '<span class="note">no hand file could be read, so this mask is not compared</span>';
+    } else if (have.length) {
       let dis = 0, recs = 0, cmp = 0;
-      for (const ex of ready) {
+      for (const ex of have) {
         const d = ex.disagree[m.k];
         if (!d) continue;
         dis += d.dis; cmp += d.cmp; if (d.dis) recs++;
@@ -570,9 +611,10 @@ function renderDefs() {
         ? '<span class="note">not comparable — no frame is annotated on all three streams</span>'
         : dis === 0
           ? `<span style="color:var(--ok)">identical on all three</span> — ${HOT3D.fmt.n(cmp)} frames compared`
-          : `differs on <span class="mono">${HOT3D.fmt.n(dis)}</span> of ${HOT3D.fmt.n(cmp)} frames, in ${recs} of ${ready.length} recordings`;
+          : `differs on <span class="mono">${HOT3D.fmt.n(dis)}</span> of ${HOT3D.fmt.n(cmp)} frames, in ${recs} of ${have.length} recordings`;
     }
-    return `<tr><td>${m.k}</td><td>${m.d}</td><td>${cell}</td></tr>`;
+    const where = m.src === 'hands' ? ' <span class="note">(hand file)</span>' : '';
+    return `<tr><td>${m.k}${where}</td><td>${m.d}</td><td>${cell}</td></tr>`;
   }).join('');
 }
 
@@ -615,7 +657,10 @@ function renderHeat() {
   body.innerHTML = rows.map(ex => {
     const cells = MASKS.map(m => {
       const st = ex.stats[m.k] ? ex.stats[m.k][stream] : null;
-      if (!st) return '<td class="heat note" title="no mask for this stream in this payload">no mask</td>';
+      if (!st) {
+        const why = missingWhy(m, ex);
+        return `<td class="heat note" title="${why}">${why === 'hand mask file not read' ? 'no file' : 'no mask'}</td>`;
+      }
       if (!st.ann) return '<td class="heat note" title="every frame is 255 on this stream">not annot.</td>';
       const t = `${m.k} / ${stream}: ${HOT3D.fmt.n(st.pass)} of ${HOT3D.fmt.n(st.ann)} frames pass`;
       return `<td class="heat" style="background:${heatColour(st.rate)}" title="${t}">${(st.rate * 100).toFixed(1)}</td>`;

@@ -29,6 +29,18 @@ import numpy as np
 STREAMS = {"214-1": "rgb", "1201-1": "slam_left", "1201-2": "slam_right"}
 MASK_FILES = ["mask_qa_pass", "mask_good_exposure", "mask_hand_visible", "mask_object_visible",
               "mask_hand_pose_available", "mask_headset_pose_available", "mask_object_pose_available"]
+# The release licenses hand annotations separately (CC BY-NC-SA) from everything else
+# (CC BY-SA), so they are written to their own file and never mixed into the main payload.
+HAND_MASKS = ("hand_visible", "hand_pose_available")
+LIC_SEQUENCE = ("HOT3D sequence data and non-hand annotations, (c) Meta Platforms Technologies, "
+                "LLC, CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/); modified: "
+                "resampled onto the RGB frame grid, boxes rotated to the upright frame, points "
+                "filtered and subsampled.")
+LIC_HANDS = ("HOT3D hand annotations, (c) Meta Platforms Technologies, LLC, CC BY-NC-SA 4.0 "
+             "(https://creativecommons.org/licenses/by-nc-sa/4.0/); modified: resampled onto the "
+             "RGB frame grid, boxes rotated to the upright frame. MANO parameters are in the "
+             "release but are not republished here: their use is gated by the SMPL-X/MANO "
+             "license.")
 MAX_POINTS = 60000
 POINT_DIST_STD_MAX = 0.02  # metres; the MPS-recommended cut for clean semidense points
 
@@ -389,7 +401,7 @@ def main(seq_dir, out_path):
     masks = masks_on_timeline(seq_dir, timeline)
 
     payload = {
-        "v": 1, "dataset": "HOT3D", "device": meta.get("headset", "Aria"), "seq": seq,
+        "v": 2, "dataset": "HOT3D", "license": LIC_SEQUENCE, "device": meta.get("headset", "Aria"), "seq": seq,
         "participant": meta.get("participant_id"), "F": F,
         "duration_s": rnd(float(t_s[-1])),
         "fps": rnd(float((F - 1) / t_s[-1])) if t_s[-1] > 0 else None,
@@ -398,7 +410,6 @@ def main(seq_dir, out_path):
         "headset": {"T": b64(head_T), "Q": b64(head_Q),
                     "frames": int(np.isfinite(head_T).all(1).sum())},
         "objects": objects,
-        "hands": hands,
         "cameras": cams,
         "streams": STREAMS,
         "display_wh": display_wh,
@@ -414,28 +425,49 @@ def main(seq_dir, out_path):
     if pts is not None:
         payload["points"] = {"xyz": b64(pts), **pt_stats}
     if masks:
-        payload["masks"] = {k: {s: b64(v, "|u1") for s, v in d.items()} for k, d in masks.items()}
+        payload["masks"] = {k: {s: b64(v, "|u1") for s, v in d.items()}
+                            for k, d in masks.items() if k not in HAND_MASKS}
 
     # a compact summary so the index and the tables never have to decode the arrays
     qa = masks.get("qa_pass", {}).get("rgb")
+    payload["hands_file"] = f"{seq}.hands.json"
     payload["summary"] = {
         "frames": F, "duration_s": payload["duration_s"], "fps": payload["fps"],
         "objects": len(objects),
         "object_names": meta["object_names"],
         "qa_pass_rgb": rnd(float(np.mean(qa[qa != 255] == 1)) if qa is not None and np.any(qa != 255) else np.nan),
-        "hand_frames": {s: hands[s]["umetrack"]["frames"] for s in hands},
         "points_kept": pt_stats["kept"] if pt_stats else None,
         "points_shown": pt_stats["shown"] if pt_stats else None,
         "headset_frames": payload["headset"]["frames"],
+    }
+
+    hands_payload = {
+        "v": 2, "dataset": "HOT3D", "license": LIC_HANDS, "seq": seq, "F": F,
+        "participant": meta.get("participant_id"),
+        "hands": {side: {k: v for k, v in rec.items() if k != "mano"}
+                  for side, rec in hands.items()},
+        "masks": {k: {s: b64(v, "|u1") for s, v in d.items()}
+                  for k, d in masks.items() if k in HAND_MASKS},
+        "summary": {"frames": F,
+                    "hand_frames": {s: hands[s]["umetrack"]["frames"] for s in hands},
+                    "mano_frames": {s: hands[s]["mano"]["frames"] for s in hands},
+                    "mano_included": False},
     }
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path + ".tmp", "w") as f:
         json.dump(payload, f, separators=(",", ":"))
     os.replace(out_path + ".tmp", out_path)
+    hands_dir = os.path.join(os.path.dirname(os.path.dirname(out_path)), "hands")
+    os.makedirs(hands_dir, exist_ok=True)
+    hands_path = os.path.join(hands_dir, f"{seq}.hands.json")
+    with open(hands_path + ".tmp", "w") as f:
+        json.dump(hands_payload, f, separators=(",", ":"))
+    os.replace(hands_path + ".tmp", hands_path)
     print(f"[{seq}] F={F} {payload['duration_s']}s objs={len(objects)} "
           f"hands L/R={hands['left']['umetrack']['frames']}/{hands['right']['umetrack']['frames']} "
-          f"pts={pt_stats['shown'] if pt_stats else 0} -> {os.path.getsize(out_path)/1e6:.1f} MB")
+          f"pts={pt_stats['shown'] if pt_stats else 0} -> {os.path.getsize(out_path)/1e6:.1f} MB "
+          f"+ {os.path.getsize(hands_path)/1e6:.1f} MB hands")
 
 
 if __name__ == "__main__":

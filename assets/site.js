@@ -65,10 +65,16 @@ const HOT3D = (() => {
     const f = document.createElement('div');
     f.className = 'site-foot wrap';
     f.innerHTML =
-      `${extra || ''} Built from the HOT3D release (Meta Reality Labs) —
+      `${extra || ''} Built from the HOT3D release (Meta Platforms Technologies) —
        <a href="https://facebookresearch.github.io/hot3d/">project page</a>,
        <a href="https://arxiv.org/abs/2411.19167">paper</a>. Figures on these pages are computed
-       from the released annotation files; nothing is re-estimated.`;
+       from the released annotation files; nothing is re-estimated.
+       Video, stills, object models and annotations shown here are modified HOT3D material under
+       <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>, and
+       <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a> for the
+       hand annotations — see
+       <a href="https://github.com/NussairHroub/hot3d-aria-viewer/blob/main/DATA_LICENSE.md">the
+       licence notice</a> for what was changed.`;
     document.body.append(f);
   }
 
@@ -104,6 +110,11 @@ const HOT3D = (() => {
   }
   const index = () => json('data/index.json');
   const sequence = (seq) => json(`data/seq/${seq}.json`);
+  /** Hand annotations live in their own file: the release licenses them CC BY-NC-SA, while the
+   *  rest of a recording is CC BY-SA, so the two are never merged into one payload.
+   *  Shape: {seq, F, hands: {left, right}, masks: {hand_visible, hand_pose_available}, summary}.
+   *  MANO parameters are not republished here (their use is gated by the SMPL-X/MANO licence). */
+  const hands = (seq) => json(`data/hands/${seq}.hands.json`);
 
   /* ---------- pose maths (quaternions are w,x,y,z) ---------- */
 
@@ -237,7 +248,7 @@ const HOT3D = (() => {
     } else { mountHeader(); mountFooter(footerExtra); }
   }
 
-  return { init, mountHeader, mountFooter, restoreTheme, f32, u8, json, index, sequence,
+  return { init, mountHeader, mountFooter, restoreTheme, f32, u8, json, index, sequence, hands,
            quatToMat3, applyPose, dist, pathLength, fmt, css, channel, linePlot, playhead, PAGES };
 })();
 

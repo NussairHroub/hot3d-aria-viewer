@@ -7,6 +7,11 @@ scene points, eye gaze, the object library, and the per-frame quality masks.
 
 A static site — no build step, no framework. Open `index.html` over any HTTP server.
 
+**Licensing in one line:** the code is MIT; everything under `data/` and `media/` is modified HOT3D
+material that keeps the dataset's own licences — CC BY-SA 4.0, and CC BY-NC-SA 4.0 (non-commercial)
+for the hand annotations in `data/hands/`, with a no-sale term on the object models. Each of those
+directories carries its own `LICENSE`; the details are in [`DATA_LICENSE.md`](DATA_LICENSE.md).
+
 ## Pages
 
 | Page | What it shows |
@@ -28,7 +33,8 @@ A static site — no build step, no framework. Open `index.html` over any HTTP s
 assets/site.css        the visual system
 assets/site.js         HOT3D.* runtime: payload decoding, pose maths, plotting, chrome
 data/index.json        metadata for all 424 recordings (198 Aria, 226 Quest 3)
-data/seq/<SEQ>.json    per-recording payload for the 12 featured recordings
+data/seq/<SEQ>.json    per-recording payload, everything except hand annotations
+data/hands/<SEQ>.hands.json  hand annotations, licensed separately (non-commercial)
 data/objects.json      the object library index
 data/objects/*.glb     object models, compacted for the web
 media/<SEQ>_rgb.mp4    704x704 H.264, 30 fps — frame i is row i of every payload array
@@ -62,11 +68,26 @@ python scripts/hot3d_objects.py <dataset_dir>/assets/assets data/index.json data
 (`imageio-ffmpeg` supplies a build with libx264); `hot3d_objects.py` needs trimesh,
 `fast-simplification` and Pillow on Python 3.10+.
 
+## Licence
+
+| What | Licence |
+| --- | --- |
+| `*.html`, `assets/`, `scripts/` | MIT ([`LICENSE`](LICENSE)) |
+| `media/`, `data/seq/`, `data/index.json` | CC BY-SA 4.0 |
+| `data/hands/` | CC BY-NC-SA 4.0 — non-commercial |
+| `data/objects/` | CC BY-SA 4.0, and the models may not be sold |
+
+Hand annotations sit in their own directory because the release licenses them differently, and one
+file cannot carry both terms. MANO parameters are not republished here; their use is gated by the
+SMPL-X/MANO licence. Attribution, the disclaimer of warranties, the full list of modifications and
+a removal-request contact are in [`DATA_LICENSE.md`](DATA_LICENSE.md).
+
 ## Provenance and terms
 
 The dataset is the HOT3D release by Meta Reality Labs
 ([paper](https://arxiv.org/abs/2411.19167), [project page](https://facebookresearch.github.io/hot3d/)),
-used under its licence; obtain it from [projectaria.com](https://www.projectaria.com/datasets/hot3D/).
+used under the HOT3D Dataset License Agreement; obtain the dataset itself from
+[projectaria.com](https://www.projectaria.com/datasets/hot3D/).
 This repository holds derived visualisations of 12 of the 198 Aria recordings — no source
 recordings and no VRS files. Object models are the released meshes with textures resampled to
 512 px and geometry decimated to at most 40k faces.

@@ -90,6 +90,7 @@
   </figure>
 
   <div class="legend" style="margin-top:12px" id="legend"></div>
+  <p class="note" id="handsNote"></p>
 
   <h2>Signal coverage over the recording</h2>
   <div id="ribbonWrap">
@@ -129,14 +130,14 @@
   <div class="table-wrap">
     <table>
       <thead><tr>
-        <th class="no-sort">Layer</th><th class="no-sort">Payload field</th><th class="no-sort">Drawn as</th>
+        <th class="no-sort">Layer</th><th class="no-sort">Source field</th><th class="no-sort">Drawn as</th>
       </tr></thead>
       <tbody>
         <tr><td>Scene points</td><td class="mono">points.xyz</td><td>One vertex per released semidense point, after the release's own <span class="mono">dist_std ≤ 2 cm</span> filter and an even subsample.</td></tr>
         <tr><td>Headset path</td><td class="mono">headset.T, headset.Q</td><td>A line through the motion-capture headset position at every frame, plus the device axis triad at the current frame.</td></tr>
         <tr><td>RGB field</td><td class="mono">cameras[camera-rgb]</td><td>The released <span class="mono">T_Device_Camera</span> applied to the headset pose; the cone half-angle is the released <span class="mono">maxSolidAngle</span>, not a guess.</td></tr>
         <tr><td>Objects</td><td class="mono">objects[].T, .Q</td><td>An oriented box with the object's <span class="mono">extent_m</span> from <span class="mono">data/objects.json</span>, centred on the model's own bounding-box centre, placed by the released pose.</td></tr>
-        <tr><td>Wrists</td><td class="mono">hands.{left,right}.umetrack</td><td>A sphere at <span class="mono">wrist_t</span>, a cross showing the three axes of <span class="mono">wrist_q</span>, and a one-second trailing path.</td></tr>
+        <tr><td>Wrists</td><td class="mono">hands.{left,right}.umetrack<br>in data/hands/&lt;seq&gt;.hands.json</td><td>A sphere at <span class="mono">wrist_t</span>, a cross showing the three axes of <span class="mono">wrist_q</span>, and a one-second trailing path. This is the one layer that comes from a second file: hand annotations carry their own licence, so they are never merged into the payload.</td></tr>
         <tr><td>MPS SLAM</td><td class="mono">slam.T</td><td>A dashed line through the headset's own closed-loop trajectory, sampled at frame times.</td></tr>
       </tbody>
     </table>
@@ -152,9 +153,11 @@
   <p class="note" id="slamNote"></p>
 
   <h2>What this page does not show</h2>
-  <p class="note">Finger joints: the payload carries the wrist pose plus UmeTrack's 22 joint angles
-  and MANO's 15 pose coefficients, but no 3D landmarks, so only wrists are drawn here — see the
-  hands page for what each model does contain. Eye gaze: it is released in the Central Pupil Frame
+  <p class="note">Finger joints: the hand file carries the wrist pose plus UmeTrack's 22 joint
+  angles, but no 3D landmarks, so only wrists are drawn here — see the hands page for what that
+  model does contain. MANO: its parameters are in the HOT3D release but are not republished in
+  these files at all, because their use is gated by the SMPL-X/MANO licence, so nothing on this
+  page is drawn from MANO. Eye gaze: it is released in the Central Pupil Frame
   and this payload does not carry the transform that would put a ray into the world, so no gaze ray
   is drawn; the gaze page plots the angles themselves. Object meshes: the boxes here use each
   model's measured size, while the models themselves are on the objects page. Images: the RGB and
@@ -330,6 +333,8 @@ async function modelCentre(uid, extent) {
 /* ---------- small helpers ---------- */
 
 const col = (name) => new THREE.Color(HOT3D.css(name));
+/** the short licence name out of a file's own licence string, e.g. "CC BY-NC-SA 4.0" */
+const licenceOf = (s) => (String(s || '').match(/CC BY[\w-]*\s+[\d.]+/) || ['under its own licence'])[0];
 const finite3 = (r) => r && isFinite(r[0]) && isFinite(r[1]) && isFinite(r[2]);
 /** line segments through a (F,3) track, leaving NaN frames as gaps */
 function trackLine(T, colorVar) {
@@ -387,15 +392,24 @@ async function load(seq) {
   view.seq = seq;
   seqSel.value = seq;
   statusEl.hidden = false;
-  statusEl.textContent = `loading data/seq/${seq}.json …`;
+  statusEl.textContent = `loading data/seq/${seq}.json and data/hands/${seq}.hands.json …`;
   labelHost.textContent = '';
   clearReadout();
   for (const k in groups) disposeGroup(groups[k]);
   rig = null;
 
+  /* Two files per recording: the payload, and the hand annotations, which the release licenses
+     separately (CC BY-NC-SA against CC BY-SA for everything else) and therefore ships on their
+     own. Both are started here and both are checked against this load's ticket below, so a
+     recording switched mid-load can never put one recording's wrists in another's scene.
+     The hand fetch is turned into a never-rejecting result, because the scene is still worth
+     drawing without it. */
+  const seqReq = HOT3D.sequence(seq);
+  const handsReq = HOT3D.hands(seq).then(h => ({ h }), e => ({ e }));
+
   let p;
   try {
-    p = await HOT3D.sequence(seq);
+    p = await seqReq;
   } catch (e) {
     if (ticket !== loadTicket) return;
     statusEl.textContent = `could not load data/seq/${seq}.json (${e.message}). The 3D view needs that file.`;
@@ -405,6 +419,16 @@ async function load(seq) {
   const lib = await HOT3D.json('data/objects.json').catch(() => null);
   if (ticket !== loadTicket) return;
   const extents = new Map((lib ? lib.objects : []).map(o => [o.uid, o.extent_m]));
+
+  /* the hand file, rejected if it is missing, malformed, or not this recording frame for frame */
+  const hres = await handsReq;
+  if (ticket !== loadTicket) return;
+  let hp = null, handsErr = null;
+  if (hres.e) handsErr = hres.e.message;
+  else if (!hres.h || !hres.h.hands || !hres.h.hands.left || !hres.h.hands.right) handsErr = 'it carries no hands block';
+  else if (hres.h.seq !== p.seq) handsErr = `it belongs to ${hres.h.seq}`;
+  else if (hres.h.F !== p.F) handsErr = `it covers ${hres.h.F} frames, not this recording's ${p.F}`;
+  else hp = hres.h;
 
   const F = p.F;
   const t = HOT3D.f32(p.t);
@@ -499,10 +523,11 @@ async function load(seq) {
     });
   }
 
-  /* wrists: sphere + axis cross + trailing path */
+  /* wrists: sphere + axis cross + trailing path, from the hand file's UmeTrack wrist pose.
+     Without that file the layer is simply empty; every other layer is built as usual. */
   const hands = [];
-  for (const side of ['left', 'right']) {
-    const src = p.hands[side].umetrack;
+  if (hp) for (const side of ['left', 'right']) {
+    const src = hp.hands[side].umetrack;
     const node = new THREE.Group();
     const ball = new THREE.Mesh(new THREE.SphereGeometry(0.018, 18, 12),
       new THREE.MeshBasicMaterial({ color: col('--c-hand') }));
@@ -522,7 +547,7 @@ async function load(seq) {
     hands.push({
       side, node, trail, trailPos,
       T: HOT3D.f32(src.wrist_t, 3), Q: HOT3D.f32(src.wrist_q, 4),
-      frames: src.frames, boxVis: HOT3D.f32(p.hands[side].boxes.rgb.vis),
+      frames: src.frames, boxVis: HOT3D.f32(hp.hands[side].boxes.rgb.vis),
     });
   }
 
@@ -541,7 +566,7 @@ async function load(seq) {
   }
   if (bounds.isEmpty()) bounds.setFromCenterAndSize(new THREE.Vector3(), new THREE.Vector3(2, 2, 2));
 
-  rig = { p, F, t, hT, hQ, sT, sQ, sQual, objs, hands, rigNode, headNode, camNode, coneNode, rgbCam, cloudMat,
+  rig = { p, hp, handsErr, F, t, hT, hQ, sT, sQ, sQual, objs, hands, rigNode, headNode, camNode, coneNode, rgbCam, cloudMat,
           fps: p.fps || 30, pointCount: n / 3, headLen, travel, slamMax, slamMissing, allPosed };
 
   /* frame the scene: look at where the objects are, from far enough to hold the head path too */
@@ -632,7 +657,7 @@ function clearReadout() {
   $('headKv').innerHTML = '';
   $('objTable').querySelector('tbody').innerHTML = '';
   $('figs').innerHTML = '';
-  for (const id of ['boxNote', 'slamNote', 'fieldNote']) $(id).textContent = '';
+  for (const id of ['boxNote', 'slamNote', 'fieldNote', 'handsNote']) $(id).textContent = '';
   $('cap').textContent = 'Drag to orbit, scroll to zoom.';
   ribbonGeom = null;
   const ctx = ribbon.getContext('2d');
@@ -647,8 +672,18 @@ function buildReadoutRows() {
                   ...rig.hands.map(h => ({ id: `h_${h.side}`, name: `${h.side} wrist` }))]
     .map(r => `<tr id="row_${r.id}"><td>${r.name}</td>
       <td id="${r.id}_pose">—</td><td class="num" id="${r.id}_d">—</td>
-      <td class="num" id="${r.id}_a">—</td><td class="num" id="${r.id}_v">—</td></tr>`).join('');
+      <td class="num" id="${r.id}_a">—</td><td class="num" id="${r.id}_v">—</td></tr>`).join('')
+    + (rig.hp ? '' : '<tr><td>wrists</td><td colspan="4" class="no">hand file not loaded</td></tr>');
   clearLabels();
+  /* where the wrists come from, and — when the second file did not arrive — that they are missing
+     and nothing else is */
+  $('handsNote').textContent = rig.hp
+    ? `The wrists are the one layer read from a second file, ${rig.p.hands_file ? `data/hands/${rig.p.hands_file}` : `data/hands/${rig.p.seq}.hands.json`}: `
+      + `the release licenses hand annotations ${licenceOf(rig.hp.license)} and the rest of the recording `
+      + `${licenceOf(rig.p.license)}, so the two cannot sit in one payload. Only UmeTrack's wrist pose is republished there.`
+    : `Wrist layer unavailable: data/hands/${rig.p.seq}.hands.json did not load (${rig.handsErr}). `
+      + `Its toggle, its rows and its coverage strip have nothing to draw; every other layer on this page `
+      + `comes from the payload and is unaffected.`;
   const ms = rig.objs.filter(o => o.size && !o.measured).length;
   const noSize = rig.objs.filter(o => !o.size).length;
   $('boxNote').textContent = (ms === 0 && noSize === 0)

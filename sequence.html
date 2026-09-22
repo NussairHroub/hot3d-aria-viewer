@@ -125,10 +125,11 @@
   as gaps rather than interpolated values.</p>
   <p class="note">Two signals are deliberately not drawn on the video. Eye gaze is given in the
   Central Pupil Frame as yaw, pitch and depth and is not projected into the image by this release,
-  so it is reported as numbers only. Hand annotations carry a wrist pose plus joint angles
-  (UmeTrack 22, MANO 15 coefficients); the payload does not expand them into 3D fingertip
-  landmarks, so only wrists, boxes and availability are shown. MANO ships no per-frame confidence
-  value, which is why that field reads as not provided.</p>
+  so it is reported as numbers only. Hand annotations carry a UmeTrack wrist pose plus 22 joint
+  angles; the payload does not expand them into 3D fingertip landmarks, so only wrists, boxes and
+  availability are shown. The hand wrists, boxes and masks on this page come from a separately
+  licensed file, <span class="mono">data/hands/&lt;SEQ&gt;.hands.json</span> under CC BY-NC-SA 4.0
+  where the rest of the recording is CC BY-SA 4.0, and MANO parameters are not republished in it.</p>
 </main>
 
 <script>
@@ -232,7 +233,14 @@ function speedOf(T, t) {
   return sp;
 }
 
-function decode(d) {
+/** d: data/seq/<SEQ>.json, hd: data/hands/<SEQ>.hands.json — the hand annotations ship as their
+ *  own file under a different licence, so the two have to be checked against each other before
+ *  their rows are read as the same frame grid. */
+function decode(d, hd) {
+  if (hd.seq !== d.seq || hd.F !== d.F) {
+    throw new Error(`the hand file ${d.hands_file} covers ${hd.seq} in ${hd.F} frames, ` +
+                    `but the payload is ${d.seq} in ${d.F} frames`);
+  }
   const F = d.F, t = HOT3D.f32(d.t), hT = HOT3D.f32(d.headset.T, 3);
   const st = {
     seq: d.seq, F, fps: d.fps, t, hT, speed: speedOf(hT, t),
@@ -244,7 +252,9 @@ function decode(d) {
     },
     masks: {}, objects: [], hands: {},
   };
+  // the five sequence masks, then the two hand masks out of the hand file: one readout, two files
   for (const key of Object.keys(d.masks)) st.masks[key] = HOT3D.u8(d.masks[key].rgb);
+  for (const key of Object.keys(hd.masks)) st.masks[key] = HOT3D.u8(hd.masks[key].rgb);
   d.objects.forEach((o, k) => {
     const T = HOT3D.f32(o.T, 3), dist = new Float32Array(F);
     for (let i = 0; i < F; i++) {
@@ -258,11 +268,10 @@ function decode(d) {
     });
   });
   for (const side of ['left', 'right']) {
-    const h = d.hands[side];
+    const h = hd.hands[side];
     st.hands[side] = {
       side,
       ume: { t: HOT3D.f32(h.umetrack.wrist_t, 3), conf: HOT3D.f32(h.umetrack.conf) },
-      mano: { t: HOT3D.f32(h.mano.wrist_t, 3), conf: HOT3D.f32(h.mano.conf) },
       box: HOT3D.f32(h.boxes.rgb.xyxy, 4), vis: HOT3D.f32(h.boxes.rgb.vis),
     };
   }
@@ -338,7 +347,7 @@ function buildReadout() {
   const hk = readout.querySelector('#handKv');
   for (const side of ['left', 'right']) {
     for (const [key, label] of [['w', 'wrist x y z (m)'], ['c', 'UmeTrack conf'],
-                                ['b', 'box in RGB'], ['m', 'MANO wrist']]) {
+                                ['b', 'box in RGB']]) {
       hk.insertAdjacentHTML('beforeend',
         `<span class="k">${side} &middot; ${label}</span><span class="v" data-r="h_${side}_${key}">—</span>`);
     }
@@ -375,9 +384,6 @@ function updateReadout(i) {
     const [bt, bc] = boxState(h.box, h.vis, i, W, H);
     R[`h_${side}_b`].textContent = bt;
     R[`h_${side}_b`].className = 'v ' + bc;
-    R[`h_${side}_m`].textContent = isFinite(h.mano.t[i][0])
-      ? `${vec(h.mano.t[i])} · conf ${isFinite(h.mano.conf[i]) ? h.mano.conf[i].toFixed(2) : 'n/a'}`
-      : '—';
   }
 
   R.gyl.textContent = HOT3D.fmt.deg(S.gaze.yaw_l[i]);
@@ -560,7 +566,8 @@ playBtn.addEventListener('click', () => {
 vid.addEventListener('error', () => {                 // the payload loaded but the mp4 did not
   if (!S || !vid.getAttribute('src')) return;         // ignore the src we clear on a failed load
   warn(`The payload for ${S.seq} loaded, but the browser could not play media/${S.seq}_rgb.mp4. ` +
-       `Every number on this page still comes from data/seq/${S.seq}.json; only the picture is missing.`);
+       `Every number on this page still comes from data/seq/${S.seq}.json and ` +
+       `data/hands/${S.seq}.hands.json; only the picture is missing.`);
 });
 vid.addEventListener('play', () => { playing = true; playBtn.textContent = 'Pause'; cancelAnimationFrame(raf); raf = requestAnimationFrame(tick); });
 vid.addEventListener('pause', () => { playing = false; playBtn.textContent = 'Play'; cancelAnimationFrame(raf); update(frameFromVideo()); });
@@ -663,9 +670,11 @@ async function load(seq) {
   statusEl.className = 'loading';
   statusEl.textContent = `Loading ${seq} …`;
   try {
-    const d = await HOT3D.sequence(seq);
+    // both files are needed before the first frame is drawn, so they are fetched together and
+    // the stale-load check sits after both have settled
+    const [d, hd] = await Promise.all([HOT3D.sequence(seq), HOT3D.hands(seq)]);
     if (token !== loadToken) return;    // a different recording was picked while this one loaded
-    S = decode(d);
+    S = decode(d, hd);
     cur = 0; geomS = geomD = null;
     refreshPalette();
     setPills();
@@ -696,7 +705,8 @@ async function load(seq) {
   } catch (err) {
     if (token !== loadToken) return;
     clearViewer();
-    warn(`Could not load ${seq}: ${err.message}. The payload is data/seq/${seq}.json and the video is media/${seq}_rgb.mp4.`);
+    warn(`Could not load ${seq}: ${err.message}. The payload is data/seq/${seq}.json, the hand ` +
+         `annotations are data/hands/${seq}.hands.json, and the video is media/${seq}_rgb.mp4.`);
   }
 }
 

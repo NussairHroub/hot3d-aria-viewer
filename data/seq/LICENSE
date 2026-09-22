@@ -1,0 +1,18 @@
+The payloads in this directory are modified HOT3D sequence data and non-hand annotations,
+licensed under Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0).
+https://creativecommons.org/licenses/by-sa/4.0/
+
+HOT3D dataset, (c) Meta Platforms Technologies, LLC.
+Prithviraj Banerjee et al., "HOT3D: Hand and Object Tracking in 3D from Egocentric Multi-View
+Videos", CVPR 2025. https://arxiv.org/abs/2411.19167  https://facebookresearch.github.io/hot3d/
+Source and dataset licence: https://www.projectaria.com/datasets/hot3D/
+                            https://www.projectaria.com/datasets/hot3d/license/
+
+Unless separately stated, the licensor offers the licensed material as-is and as-available, and
+makes no representations or warranties of any kind concerning it, whether express, implied,
+statutory or other. See the licence for the full disclaimer of warranties.
+
+Modifications: annotations resampled onto the 30 Hz RGB frame grid by nearest timestamp within
+8 ms; 2D boxes rotated into the upright display frame; semidense points filtered to dist_std
+<= 2 cm and evenly subsampled; arrays stored as base64 float32. Hand annotations are NOT in these
+files — they are licensed differently and live in ../hands/. See ../../DATA_LICENSE.md.

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Hands · HOT3D Aria</title>
-<meta name="description" content="Everything the HOT3D release says about hands: the UmeTrack and MANO wrist poses and parameters, how often each hand is annotated, and how far the two models' wrist frames sit apart.">
+<meta name="description" content="What the HOT3D release ships for a hand: UmeTrack wrist poses, joint angles and 2D boxes, how often each hand is annotated, and why the MANO parameters are not republished here.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -31,6 +31,9 @@
   .kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; font-size: 13.5px; margin: 8px 0 0; }
   .kv dt { color: var(--muted); font-family: var(--mono); font-size: 12px; }
   .kv dd { margin: 0; }
+  .lic { margin: 0 0 24px; }
+  .lic p { max-width: 80ch; }
+  .lic .src { font-size: 11.5px; line-height: 1.5; margin: 8px 0 0; word-break: break-word; }
   @media (max-width: 560px) {
     .barrow { grid-template-columns: 100px 1fr; }
     .panel { grid-template-columns: 1fr; }
@@ -41,54 +44,65 @@
 <main class="wrap">
   <div class="page-head">
     <p class="eyebrow">Hand annotation</p>
-    <h1>Two hand models, one wrist pose per frame</h1>
-    <p class="lede">HOT3D ships each hand twice: once as a UmeTrack skeleton and once as MANO. Both
-    are fitted to the same motion-capture ground truth, so they are posed on exactly the same
-    frames — but their wrist frames are defined differently, which shows up as a standing offset of
-    roughly a hand's width. This page reads the twelve featured Aria payloads and reports what is
-    actually in them.</p>
+    <h1>One wrist pose and one angle vector, per hand per frame</h1>
+    <p class="lede">HOT3D annotates a hand as a wrist transform plus a vector of joint angles, fitted
+    to the same motion-capture ground truth as the headset and object poses. The release carries two
+    parameterisations of that hand, UmeTrack and MANO; only UmeTrack is republished on this site.
+    This page reads the twelve featured Aria hand files and reports what is actually in them.</p>
+  </div>
+
+  <div class="warn-box lic">
+    <p style="margin:0"><strong>The data on this page is non-commercial.</strong> HOT3D licenses its
+    hand annotations under
+    <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a>, while the rest
+    of the release — and therefore every other page on this site — is
+    <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>. ShareAlike does not
+    allow the extra NonCommercial term to be attached to BY-SA material, so the two cannot live in
+    one file: hand data is kept in <span class="mono">data/hands/&lt;SEQ&gt;.hands.json</span> and
+    everything below is read from there. Details in
+    <a href="DATA_LICENSE.md">DATA_LICENSE.md</a>.</p>
+    <p class="note mono src" id="licStr">Licence line loads with the hand files.</p>
   </div>
 
   <section class="figs" aria-label="Hand annotation at a glance">
     <div class="fig"><div class="n" id="fFrames">—</div><div class="k">posed hand-frames, 12 recordings</div></div>
     <div class="fig"><div class="n" id="fUme">—</div><div class="k">UmeTrack joint angles</div></div>
-    <div class="fig"><div class="n" id="fMano">—</div><div class="k">MANO pose coefficients</div></div>
-    <div class="fig"><div class="n" id="fOff">—</div><div class="k">median UmeTrack–MANO wrist gap</div></div>
+    <div class="fig"><div class="n" id="fManoCov">—</div><div class="k">of those the release also annotates with MANO</div></div>
+    <div class="fig"><div class="n" id="fBox">—</div><div class="k">hand boxes in the RGB view</div></div>
   </section>
-  <p class="loading" id="status">Loading the twelve featured payloads…</p>
+  <p class="loading" id="status">Loading the twelve featured recordings…</p>
 
-  <h2>What the release ships for a hand</h2>
+  <h2>What this file ships for a hand</h2>
   <div class="cards">
     <div class="card">
       <h3>UmeTrack</h3>
       <div class="meta">A wrist transform plus a vector of joint angles for the hand skeleton. In
-      this payload: <span class="mono">wrist_t</span> (F×3, metres), <span class="mono">wrist_q</span>
+      the hand file: <span class="mono">wrist_t</span> (F×3, metres), <span class="mono">wrist_q</span>
       (F×4, w·x·y·z), <span class="mono">params</span> (F×<span id="nU">22</span>, radians) and a
-      per-frame <span class="mono">conf</span>.</div>
+      per-frame <span class="mono">conf</span>, under
+      <span class="mono">hands.&lt;side&gt;.umetrack</span>.</div>
       <dl class="kv" id="kvU"></dl>
     </div>
     <div class="card">
-      <h3>MANO</h3>
-      <div class="meta">A wrist transform plus pose coefficients of the MANO hand model. In this
-      payload: <span class="mono">wrist_t</span>, <span class="mono">wrist_q</span>,
-      <span class="mono">params</span> (F×<span id="nM">15</span>) and <span class="mono">conf</span>.
-      The release pairs these with per-participant MANO shape parameters (betas); the betas are a
-      property of the person, not of the frame, and this site's payload does not carry them.</div>
+      <h3>MANO — counted, not carried</h3>
+      <div class="meta">The release's second hand parameterisation. This file keeps only its frame
+      count, in <span class="mono">summary.mano_frames</span>; the pose coefficients are not
+      republished, and <span class="mono">summary.mano_included</span> says so. The reason, and where
+      to get them, is a section below.</div>
       <dl class="kv" id="kvM"></dl>
     </div>
   </div>
 
   <div class="warn-box" style="margin-top:14px">
-    <p style="margin:0">This payload carries the <strong>wrist pose and the model parameters</strong>,
-    not expanded finger landmarks. Turning the <span id="nU2">22</span> angles or the
-    <span id="nM2">15</span> coefficients into 3D fingertips
-    needs the corresponding hand model and the per-participant hand shape, neither of which is
-    included here. Nothing on this page should be read as a finger-joint position.</p>
+    <p style="margin:0">This file carries the <strong>wrist pose and the model parameters</strong>,
+    not expanded finger landmarks. Turning the <span id="nU2">22</span> angles into 3D fingertips
+    needs the UmeTrack hand model and the per-participant hand shape, neither of which is included
+    here. Nothing on this page should be read as a finger-joint position.</p>
   </div>
 
   <h2>Per-recording availability</h2>
   <p id="availProse">A hand is annotated on a frame when the released trajectory has an entry for it;
-  everywhere else the payload stores NaN. Separately, the release gives a 2D box per hand per camera,
+  everywhere else the file stores NaN. Separately, the release gives a 2D box per hand per camera,
   present on the frames where that hand falls inside that camera's view. The two are independent
   channels rather than one nested inside the other, and the counts below measure them separately.</p>
   <div class="lg" style="margin-top:12px">
@@ -112,16 +126,17 @@
         <th class="no-sort num">Both</th>
         <th class="no-sort num">Left box, RGB</th>
         <th class="no-sort num">Right box, RGB</th>
-        <th class="no-sort num">L · R gap</th>
       </tr></thead>
-      <tbody id="tbody"><tr><td colspan="9" class="loading">waiting for payloads…</td></tr></tbody>
+      <tbody id="tbody"><tr><td colspan="8" class="loading">waiting for hand files…</td></tr></tbody>
     </table>
   </div>
-  <p class="note">Posed counts come from <span class="mono">hands.&lt;side&gt;.umetrack.frames</span>;
-  MANO has the same count on every hand of every featured recording, so one column covers both. “Both”
-  is the release mask <span class="mono">masks.hand_pose_available.rgb</span>, which is 1 exactly on
-  the frames where both hands are posed. The last column is the median UmeTrack–MANO wrist distance
-  for that recording, left and right.</p>
+  <p class="note">Posed counts come from
+  <span class="mono">hands.&lt;side&gt;.umetrack.frames</span> in
+  <span class="mono">data/hands/&lt;SEQ&gt;.hands.json</span>; box counts from
+  <span class="mono">hands.&lt;side&gt;.boxes.rgb.frames_seen</span> in the same file. “Both” is the
+  release mask <span class="mono">masks.hand_pose_available.rgb</span>, which on these twelve is 1 on
+  exactly the frames where both hands are posed. Frame counts come from the sequence payload and
+  match <span class="mono">F</span> in the hand file.</p>
 
   <h2>One recording in detail</h2>
   <div class="ctl">
@@ -154,25 +169,24 @@
       <canvas class="chart" id="cSep"></canvas>
       <figcaption id="capSep">Distance between the two wrists.</figcaption>
     </figure>
-    <figure>
-      <div class="lg">
-        <span><i style="color:var(--c-hand)"></i>left hand</span>
-        <span><i style="color:var(--c-hand);border-top-style:dashed"></i>right hand</span>
-      </div>
-      <canvas class="chart" id="cOff"></canvas>
-      <figcaption id="capOff">UmeTrack versus MANO wrist position.</figcaption>
-    </figure>
   </div>
 
-  <h3>Why the two models disagree</h3>
-  <p id="offProse">The gap between the UmeTrack wrist and the MANO wrist is not a tracking error. The
-  two models anchor the wrist at different places in the hand and orient the frame differently, so a
-  roughly constant offset is expected. What matters is that it is steady: the trace above stays flat
-  for as long as the hand is annotated.</p>
+  <h2>MANO: in the release, not in this file</h2>
+  <p id="manoProse">HOT3D fits two hand parameterisations to the same motion-capture ground truth.
+  UmeTrack is the one shown on this page. MANO is the other: the widely used parametric hand model,
+  stored in the release as per-frame pose coefficients plus a per-participant shape vector (betas).
+  Its frame count is kept here in <span class="mono">summary.mano_frames</span>; its parameters are
+  not, because their use is gated by the SMPL-X/MANO licence, which this site cannot pass on. The
+  counts load with the page.</p>
+  <p class="note">Get the MANO parameters from the official release —
+  <a href="https://www.projectaria.com/datasets/hot3D/">projectaria.com/datasets/hot3D</a> — under
+  its own agreement, and the hand model itself from
+  <a href="https://mano.is.tue.mpg.de/">mano.is.tue.mpg.de</a>. Because the coefficients are absent
+  here, this page computes no comparison between the two models.</p>
 
   <h2>UmeTrack joint angles</h2>
   <p>UmeTrack stores the hand pose as a vector of joint angles alongside the wrist transform. The
-  payload keeps them in release order as an unnamed vector, so the rows below are numbered rather
+  file keeps them in release order as an unnamed vector, so the rows below are numbered rather
   than named; each row is one angle over the whole recording.</p>
   <div class="ctl">
     <span class="toggles" role="group" aria-label="Which hand">
@@ -192,7 +206,7 @@
     <div class="fig"><div class="n" id="fMedBL">—</div><div class="k">median left box in RGB</div></div>
     <div class="fig"><div class="n" id="fMedBR">—</div><div class="k">median right box in RGB</div></div>
   </div>
-  <p id="worstProse" class="note" style="margin-top:14px">Worst cases load with the payloads.</p>
+  <p id="worstProse" class="note" style="margin-top:14px">Worst cases load with the hand files.</p>
   <p class="note" id="idxProse">Beyond these twelve, <span class="mono">data/index.json</span> records
   which Aria recordings list hand files and which are flagged as ground truth; those counts load with
   the page.</p>
@@ -236,35 +250,36 @@ function pairCounts(a, b) {                 // both / a-only / b-only / neither
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
 const num = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '—');
 
-/* ---------- payload -> the numbers this page needs ---------- */
+/* ---------- payload + hand file -> the numbers this page needs ---------- */
 
-function prep(p) {
+/* p is data/seq/<SEQ>.json (timeline, headset, fps); hf is data/hands/<SEQ>.hands.json
+   (every hand field). The release licenses the two differently, so they are separate files. */
+function prep(p, hf) {
+  if (hf.F !== p.F) throw new Error(`${p.seq}: hand file has ${hf.F} frames, payload has ${p.F}`);
   const rec = { seq: p.seq, participant: p.participant, F: p.F, dur: p.duration_s,
-                t: HOT3D.f32(p.t), hands: {}, payload: p };
+                t: HOT3D.f32(p.t), hands: {}, payload: p, hf,
+                license: hf.license, manoIncluded: hf.summary.mano_included };
   rec.headZ = new Float32Array(rec.F);
   const H = HOT3D.f32(p.headset.T, 3);
   for (let i = 0; i < rec.F; i++) rec.headZ[i] = H[i][2];
   for (const side of SIDES) {
-    const h = p.hands[side];
+    const h = hf.hands[side];
     const u = HOT3D.f32(h.umetrack.wrist_t, 3);
-    const m = HOT3D.f32(h.mano.wrist_t, 3);
     const box = HOT3D.f32(h.boxes.rgb.xyxy, 4);
-    const off = new Float32Array(rec.F);
-    for (let i = 0; i < rec.F; i++) off[i] = 100 * HOT3D.dist(u[i], m[i]);
-    const confU = HOT3D.f32(h.umetrack.conf), confM = HOT3D.f32(h.mano.conf);
+    const confU = HOT3D.f32(h.umetrack.conf);
     rec.hands[side] = {
-      u, m, off,
+      u,
       posed: finiteMask(u), boxed: finiteMask(box),
-      nPose: h.umetrack.frames, nPoseMano: h.mano.frames,
+      nPose: h.umetrack.frames,
       nBox: h.boxes.rgb.frames_seen,
-      nParamsU: h.umetrack.n_params, nParamsM: h.mano.n_params,
-      confUFinite: count2(confU), confMFinite: count2(confM),
+      nParamsU: h.umetrack.n_params,
+      nMano: hf.summary.mano_frames[side],
+      confUFinite: count2(confU),
       confUMin: Math.min.apply(null, Array.from(confU).filter(Number.isFinite)),
       confUMax: Math.max.apply(null, Array.from(confU).filter(Number.isFinite)),
-      medOff: median(off),
     };
   }
-  rec.bothMask = HOT3D.u8(p.masks.hand_pose_available.rgb);
+  rec.bothMask = HOT3D.u8(hf.masks.hand_pose_available.rgb);
   rec.nBoth = count(rec.bothMask, 1);
   return rec;
 }
@@ -329,35 +344,6 @@ function drawCharts() {
     Defined only on the ${F1.n(rec.nBoth)} frames where both hands are posed
     (${F1.pct(rec.nBoth / rec.F)} of the recording). Median ${num(median(sep), 1)} cm, range
     ${num(minFinite(sep), 1)}–${num(maxFinite(sep), 1)} cm.`;
-
-  const ol = rec.hands.left.off, or_ = rec.hands.right.off;
-  HOT3D.linePlot($('cOff'), t, [
-    { v: ol, color: hand, width: 1.5 },
-    { v: or_, color: hand, dash: [5, 4], width: 1.5 },
-  ], { fmt: (v) => v.toFixed(1), ...zeroTo(maxFinite(ol), maxFinite(or_)) });
-  const ml = rec.hands.left.medOff, mr = rec.hands.right.medOff;
-  $('capOff').innerHTML = `Distance between the UmeTrack wrist and the MANO wrist of the same hand,
-    centimetres, ${esc(rec.seq)}. Median ${num(ml)} cm on the left and ${num(mr)} cm on the right;
-    the left trace stays inside ${num(minFinite(ol))}–${num(maxFinite(ol))} cm and the right inside
-    ${num(minFinite(or_))}–${num(maxFinite(or_))} cm. The two models place and orient the wrist frame
-    differently, so this offset is a convention difference, not an error in either track.`;
-
-  $('offProse').innerHTML = `The gap between the UmeTrack wrist and the MANO wrist is not a tracking
-    error: the two models anchor the wrist at a different point in the hand and orient its frame
-    differently, so a near-constant offset is expected. In ${esc(rec.seq)} the left-hand gap holds a
-    median of ${num(ml)} cm with 90% of frames inside ${num(pct(ol, .05))}–${num(pct(ol, .95))} cm,
-    and the right-hand gap a median of ${num(mr)} cm inside
-    ${num(pct(or_, .05))}–${num(pct(or_, .95))} cm — a spread of about
-    ${num(pct(ol, .95) - pct(ol, .05), 1)} cm around an offset near ${num(ml, 0)} cm. Subtract it as
-    a convention; do not read it as either model being wrong. The offset also differs by side and
-    between recordings, so it is worth measuring per hand rather than assuming one constant.`;
-}
-function pct(a, p) {
-  const v = [];
-  for (const x of a) if (Number.isFinite(x)) v.push(x);
-  if (!v.length) return NaN;
-  v.sort((q, r) => q - r);
-  return v[Math.min(v.length - 1, Math.max(0, Math.round((v.length - 1) * p)))];
 }
 function maxFinite(a) { let m = -Infinity; for (const v of a) if (Number.isFinite(v) && v > m) m = v; return m; }
 function minFinite(a) { let m = Infinity; for (const v of a) if (Number.isFinite(v) && v < m) m = v; return m; }
@@ -383,7 +369,7 @@ function drawStrip() {
   const rec = S.sel, cv = $('cStrip');
   if (!rec) return;
   const side = S.hand;
-  const h = rec.payload.hands[side].umetrack;
+  const h = rec.hf.hands[side].umetrack;
   const n = h.n_params;
   const key = `${rec.seq}/${side}`;
   if (!PARAMS.has(key)) PARAMS.set(key, HOT3D.f32(h.params, n));
@@ -526,7 +512,6 @@ function renderAvailability() {
       <td class="num">${F1.pct(rec.nBoth / rec.F, 0)}</td>
       <td class="num">${F1.n(L.nBox)} · ${F1.pct(L.nBox / rec.F, 0)}</td>
       <td class="num">${F1.n(R.nBox)} · ${F1.pct(R.nBox / rec.F, 0)}</td>
-      <td class="num">${num(L.medOff, 1)} · ${num(R.medOff, 1)} cm</td>
     </tr>`);
   }
   $('tbody').innerHTML = rows.join('');
@@ -536,7 +521,8 @@ function renderSummary(ix) {
   const all = [];
   for (const rec of S.recs) for (const side of SIDES) {
     all.push({ seq: rec.seq, side, pose: rec.hands[side].nPose / rec.F, box: rec.hands[side].nBox / rec.F,
-               off: rec.hands[side].medOff, n: rec.hands[side].nPose });
+               n: rec.hands[side].nPose, nBox: rec.hands[side].nBox, nMano: rec.hands[side].nMano,
+               full: rec.hands[side].nPose === rec.F });
   }
   const pick = (side, key) => all.filter(r => r.side === side).map(r => r[key]);
   $('fMedL').textContent = F1.pct(median(pick('left', 'pose')), 1);
@@ -547,18 +533,14 @@ function renderSummary(ix) {
   const worstPose = all.slice().sort((a, b) => a.pose - b.pose).slice(0, 3);
   const worstBox = all.slice().sort((a, b) => a.box - b.box).slice(0, 3);
   const say = (r, k) => `${esc(F1.seq(r.seq))} ${r.side} (${F1.pct(r[k], 1)})`;
-  const offs = all.map(r => r.off);
   const poses = all.map(r => r.pose).sort((a, b) => a - b);
-  const rightWider = S.recs.filter(r => r.hands.right.medOff > r.hands.left.medOff).length;
-  const medOffL = median(pick('left', 'off')), medOffR = median(pick('right', 'off'));
+  const nFull = all.filter(r => r.full).length;
   $('worstProse').innerHTML = `Lowest pose coverage: ${worstPose.map(r => say(r, 'pose')).join(', ')}.
     Lowest box coverage in the RGB view: ${worstBox.map(r => say(r, 'box')).join(', ')}. Every other
-    hand of the ${all.length} is posed on at least ${F1.pct(poses[3], 1)} of its frames. The median
-    UmeTrack–MANO wrist gap over those ${all.length} hands is ${num(median(offs))} cm, ranging from
-    ${num(Math.min.apply(null, offs))} to ${num(Math.max.apply(null, offs))} cm; the right-hand gap
-    is the larger of the two in ${rightWider} of the ${S.recs.length} recordings
-    (median ${num(medOffL, 1)} cm left against ${num(medOffR, 1)} cm right), which is what a
-    per-side frame convention looks like.`;
+    hand of the ${all.length} is posed on at least ${F1.pct(poses[3], 1)} of its frames, and
+    ${nFull} of the ${all.length} carry a pose on every frame of their recording. Coverage is a
+    property of the recording, not of a model: the release annotates a hand when its ground truth
+    exists, so the same frames are missing for both parameterisations.`;
 
   /* pose and box are separate channels: neither count contains the other */
   let bnpFrames = 0, bnpHands = 0, worstBnp = null;
@@ -576,7 +558,7 @@ function renderSummary(ix) {
        the other, so read the two bars below independently`
     : 'though on these twelve the box count stays at or below the posed count for every hand';
   $('availProse').innerHTML = `A hand is annotated on a frame when the released trajectory has an
-    entry for it; everywhere else the payload stores NaN. Separately, the release gives a 2D box per
+    entry for it; everywhere else the file stores NaN. Separately, the release gives a 2D box per
     hand per camera, present on the frames where that hand falls inside that camera's view. The two
     are independent channels: across the twelve recordings the RGB box is present on
     ${F1.n(bnpFrames)} frames that carry no wrist pose for the same hand
@@ -584,29 +566,29 @@ function renderSummary(ix) {
     ${esc(F1.seq(worstBnp.seq))} ${worstBnp.side}, ${F1.n(worstBnp.k)} frames` : ''}), ${bigger}.`;
 
   const totalPosed = all.reduce((s, r) => s + r.n, 0);
+  const totalBox = all.reduce((s, r) => s + r.nBox, 0);
+  const totalMano = all.reduce((s, r) => s + r.nMano, 0);
   $('fFrames').textContent = F1.n(totalPosed);
-  $('fOff').textContent = `${num(median(offs), 1)} cm`;
+  $('fBox').textContent = F1.n(totalBox);
+  $('fManoCov').textContent = totalPosed ? F1.pct(totalMano / totalPosed, 1) : '—';
 
-  const setU = new Set(), setM = new Set();
-  for (const rec of S.recs) for (const side of SIDES) {
-    setU.add(rec.hands[side].nParamsU); setM.add(rec.hands[side].nParamsM);
-  }
+  const setU = new Set();
+  for (const rec of S.recs) for (const side of SIDES) setU.add(rec.hands[side].nParamsU);
   const nParU = [...setU].sort((a, b) => a - b).join(' / ');
-  const nParM = [...setM].sort((a, b) => a - b).join(' / ');
   $('fUme').textContent = nParU;
-  $('fMano').textContent = nParM;
   $('nU').textContent = nParU;
-  $('nM').textContent = nParM;
   $('nU2').textContent = nParU;
-  $('nM2').textContent = nParM;
 
-  let uconf = 0, uframes = 0, mconf = 0, sameFrames = true;
+  let uconf = 0, uframes = 0, sameFrames = true, anyMano = false;
   let cMin = Infinity, cMax = -Infinity;
-  for (const rec of S.recs) for (const side of SIDES) {
-    const h = rec.hands[side];
-    uconf += h.confUFinite; uframes += h.nPose; mconf += h.confMFinite;
-    if (h.nPose !== h.nPoseMano) sameFrames = false;
-    if (Number.isFinite(h.confUMin)) { cMin = Math.min(cMin, h.confUMin); cMax = Math.max(cMax, h.confUMax); }
+  for (const rec of S.recs) {
+    if (rec.manoIncluded) anyMano = true;
+    for (const side of SIDES) {
+      const h = rec.hands[side];
+      uconf += h.confUFinite; uframes += h.nPose;
+      if (h.nMano !== h.nPose) sameFrames = false;
+      if (Number.isFinite(h.confUMin)) { cMin = Math.min(cMin, h.confUMin); cMax = Math.max(cMax, h.confUMax); }
+    }
   }
   const confRange = Number.isFinite(cMin)
     ? (cMax - cMin < 5e-3 ? `constant ${cMin.toFixed(2)}` : `${cMin.toFixed(2)}–${cMax.toFixed(2)}`)
@@ -614,9 +596,22 @@ function renderSummary(ix) {
   $('kvU').innerHTML = `<dt>posed frames</dt><dd>${F1.n(uframes)} across the twelve</dd>
     <dt>conf</dt><dd>present on ${F1.n(uconf)} of them, value ${confRange}</dd>
     <dt>params</dt><dd>${nParU} angles per frame, radians</dd>`;
-  $('kvM').innerHTML = `<dt>posed frames</dt><dd>${sameFrames ? 'identical to UmeTrack, frame for frame' : 'differs from UmeTrack'}</dd>
-    <dt>conf</dt><dd>${mconf === 0 ? 'NaN on every frame — not carried' : `present on ${F1.n(mconf)} frames`}</dd>
-    <dt>params</dt><dd>${nParM} pose coefficients per frame</dd>`;
+  $('kvM').innerHTML = `<dt>annotated frames</dt><dd>${F1.n(totalMano)} — ${sameFrames
+      ? 'the same frames as UmeTrack, hand for hand' : 'a different count from UmeTrack on at least one hand'}</dd>
+    <dt>params</dt><dd>not in this file</dd>
+    <dt>mano_included</dt><dd>${anyMano ? 'true in at least one file' : 'false in all twelve'}</dd>`;
+
+  $('manoProse').innerHTML = `HOT3D fits two hand parameterisations to the same motion-capture ground
+    truth. UmeTrack is the one shown on this page. MANO is the other: the widely used parametric hand
+    model, stored in the release as per-frame pose coefficients plus a per-participant shape vector
+    (betas). Only its frame count survives into this file, in
+    <span class="mono">summary.mano_frames</span> — ${F1.n(totalMano)} annotated hand-frames across
+    the twelve recordings, ${sameFrames
+      ? 'exactly the frames UmeTrack covers, hand for hand, so nothing is annotated by one model and not the other'
+      : 'which does not match the UmeTrack count on every hand'}. The parameters themselves are
+    withheld here because their use is gated by the SMPL-X/MANO licence, which this site is not able
+    to pass on; <span class="mono">summary.mano_included</span> is
+    ${anyMano ? 'not false everywhere' : 'false in all twelve files'}.`;
 
   if (ix) {
     const aria = ix.sequences.filter(r => r.device === 'Aria');
@@ -629,14 +624,20 @@ function renderSummary(ix) {
       ${both ? `all ${F1.n(aria.length)} Aria recordings as listing both hand files`
              : `${F1.n(ume)} Aria recordings as listing a UmeTrack file and ${F1.n(mano)} a MANO file`},
       while ${F1.n(gt)} of them are flagged <span class="mono">have_gt</span> — the file flag records
-      what the release lists, not what it hands out, and the test split withholds its annotations.
-      The twelve featured here are all inside the ground-truth set, and every figure on this page is
-      theirs alone.`;
+      what the release lists, not what it hands out, and the test split withholds its annotations. Of
+      the two hand files the release lists, only the UmeTrack one is republished here. The twelve
+      featured are all inside the ground-truth set, and every figure on this page is theirs alone.`;
   } else {
     $('idxProse').innerHTML = `<span class="mono">data/index.json</span> did not load, so the
       release-wide hand-file counts are not shown. Every other figure on this page comes from the
-      twelve payloads listed above.`;
+      twelve hand files listed above.`;
   }
+
+  const lics = new Set(S.recs.map(r => r.license).filter(Boolean));
+  $('licStr').textContent = lics.size === 1
+    ? [...lics][0]
+    : (lics.size ? `${lics.size} different licence lines across the twelve hand files — see DATA_LICENSE.md.`
+                 : 'The hand files carry no licence line.');
 }
 
 /* ---------- wiring ---------- */
@@ -669,13 +670,13 @@ if (matchMedia('(prefers-color-scheme: dark)').addEventListener) {
 (async () => {
   const status = $('status');
   let done = 0;
-  const tick = () => { status.textContent = `Loading the twelve featured payloads… ${++done}/${SEQS.length}`; };
+  const tick = () => { status.textContent = `Loading the twelve featured recordings… ${++done}/${SEQS.length}`; };
   try {
-    const [ix, ...payloads] = await Promise.all([
+    const [ix, ...pairs] = await Promise.all([
       HOT3D.index().catch(() => null),
-      ...SEQS.map(s => HOT3D.sequence(s).then(p => { tick(); return p; })),
+      ...SEQS.map(s => Promise.all([HOT3D.sequence(s), HOT3D.hands(s)]).then(r => { tick(); return r; })),
     ]);
-    S.recs = payloads.map(prep);
+    S.recs = pairs.map(([p, hf]) => prep(p, hf));
     for (const rec of S.recs) S.by.set(rec.seq, rec);
     $('seqSel').innerHTML = S.recs
       .map(r => `<option value="${esc(r.seq)}">${esc(r.seq)} · ${esc(r.participant)}</option>`).join('');
@@ -684,13 +685,13 @@ if (matchMedia('(prefers-color-scheme: dark)').addEventListener) {
     const start = S.by.has('P0003_ebdc6ff7') ? 'P0003_ebdc6ff7' : S.recs[0].seq;
     $('seqSel').value = start;
     selectRec(start);
-    status.textContent = `Read ${SEQS.length} payloads: ` +
+    status.textContent = `Read ${SEQS.length} payloads and ${SEQS.length} hand files: ` +
       `${F1.n(S.recs.reduce((s, r) => s + r.F, 0))} frames, ` +
       `${F1.clock(S.recs.reduce((s, r) => s + r.dur, 0))} of recording.`;
   } catch (e) {
-    status.innerHTML = `<span style="color:var(--bad)">Could not load the payloads: ${esc(e.message)}.</span>
+    status.innerHTML = `<span style="color:var(--bad)">Could not load the hand files: ${esc(e.message)}.</span>
       The figures below stay empty; the prose describes the release, not this page's numbers.`;
-    $('tbody').innerHTML = `<tr><td colspan="9">No data — ${esc(e.message)}</td></tr>`;
+    $('tbody').innerHTML = `<tr><td colspan="8">No data — ${esc(e.message)}</td></tr>`;
   }
 })();
 </script>

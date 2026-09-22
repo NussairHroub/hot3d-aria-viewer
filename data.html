@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>About the data · HOT3D Aria</title>
-<meta name="description" content="What a HOT3D Aria recording folder contains, how large the release is, and every step between the released files and the figures on this site.">
+<meta name="description" content="What a HOT3D Aria recording folder contains, how the derived payload splits into a sequence file and a hand file for licence reasons, and every step between the released files and the figures on this site.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -13,6 +13,7 @@
 <style>
   td.txt { white-space: normal; min-width: 24ch; }
   table.files td.txt { max-width: 44ch; }
+  table.split td.txt { max-width: 46ch; }
   td.path, .path { font-family: var(--mono); font-size: 12.5px; }
   td.piece { white-space: normal; max-width: 22ch; }
   .dl { display: grid; grid-template-columns: max-content 1fr; gap: 7px 20px; margin: 0; }
@@ -45,10 +46,12 @@
     truth for the headset, both hands and every object, 2D boxes, quality masks, and Aria's own
     machine-perception output. This page lists those files, gives the sizes involved, and states
     every step between them and the figures on the other pages, so a reader can check the numbers
-    or rebuild the site.</p>
+    or rebuild the site. The derived payload is two files per recording, not one: the release
+    licenses hand annotations more restrictively than everything else, so the hand data is kept in
+    a file of its own.</p>
   </div>
 
-  <p class="loading" id="status">Reading <span class="path">data/index.json</span>, one sequence payload, the object index and one media manifest…</p>
+  <p class="loading" id="status">Reading <span class="path">data/index.json</span>, one sequence payload and its hand payload, the object index and one media manifest…</p>
 
   <section class="figs" aria-label="Scope of this site">
     <div class="fig"><div class="n" id="fAria">—</div><div class="k">Aria recordings in the release</div></div>
@@ -56,7 +59,8 @@
     <div class="fig"><div class="n" id="fFrames">—</div><div class="k">RGB frames in those</div></div>
     <div class="fig"><div class="n" id="fMin">—</div><div class="k">minutes of footage</div></div>
     <div class="fig"><div class="n" id="fVrs">—</div><div class="k">source VRS behind them</div></div>
-    <div class="fig"><div class="n" id="fPay">—</div><div class="k">derived payload, one recording</div></div>
+    <div class="fig"><div class="n" id="fPay">—</div><div class="k">sequence payload, one recording</div></div>
+    <div class="fig"><div class="n" id="fHands">—</div><div class="k">its hand payload, separate file</div></div>
   </section>
   <p class="note">Every figure on this page is either measured from the files this site serves, at
   the moment you load it, or taken from the HOT3D v4.0.0 download manifest; each table says which.
@@ -133,21 +137,26 @@
           <td class="path">ground_truth</td>
           <td class="txt">The same for the left and right hand.</td>
           <td class="txt"><a href="sequence.html">Sequence viewer</a> overlay,
-          <a href="hands.html">Hands</a></td>
+          <a href="hands.html">Hands</a> — through the hand payload, not the sequence one</td>
         </tr>
         <tr>
           <td class="path">umetrack_hand_pose_trajectory.jsonl</td>
           <td class="path">hand_data</td>
           <td class="txt">UmeTrack hand pose per timestamp: the wrist transform plus
-          <span id="tUme">22</span> joint angles per hand, and a confidence value.</td>
-          <td class="txt"><a href="hands.html">Hands</a>, <a href="scene3d.html">3D scene</a> (wrists)</td>
+          <span id="tUme">—</span> joint angles per hand, and a confidence value.</td>
+          <td class="txt"><a href="hands.html">Hands</a>, <a href="scene3d.html">3D scene</a> (wrists)
+          — the only hand model republished here, in
+          <span class="path">data/hands/&lt;SEQ&gt;.hands.json</span></td>
         </tr>
         <tr>
           <td class="path">mano_hand_pose_trajectory.jsonl</td>
           <td class="path">hand_data</td>
-          <td class="txt">MANO hand pose for the same frames: wrist transform plus
-          <span id="tMano">15</span> pose coefficients per hand.</td>
-          <td class="txt"><a href="hands.html">Hands</a></td>
+          <td class="txt">MANO hand pose for the same frames: a wrist transform plus pose
+          coefficients per hand.</td>
+          <td class="txt">Not republished. MANO is in the release, but its use is gated by the
+          SMPL-X/MANO licence, so this site ships UmeTrack only; the hand payload keeps
+          <span class="mono">summary.mano_frames</span> to record how many frames the release's
+          MANO annotation covers. See <a href="#terms">Licence</a>.</td>
         </tr>
         <tr>
           <td class="path">umetrack_hand_user_profile.json</td>
@@ -166,7 +175,8 @@
           <span class="mono">headset_pose_available</span>, <span class="mono">object_pose_available</span>
           — with a column per camera stream.</td>
           <td class="txt"><a href="quality.html">Annotation quality</a>,
-          <a href="sequence.html">Sequence viewer</a></td>
+          <a href="sequence.html">Sequence viewer</a>. The two hand masks follow the hand data into
+          the hand payload; the other five stay in the sequence payload.</td>
         </tr>
         <tr>
           <td class="path">timecode_devicetime_mapping.csv</td>
@@ -196,8 +206,10 @@
         <tr>
           <td class="path">license.txt</td>
           <td class="path piece">ground_truth, hand_data</td>
-          <td class="txt">The HOT3D license the data is used under. The download manifest lists it
-          inside both of the pieces whose contents it enumerates.</td>
+          <td class="txt">The HOT3D license the data is used under. It sets different terms for
+          hand data than for the rest of the recording, which is why the derived payload is split
+          in two. The download manifest lists it inside both of the pieces whose contents it
+          enumerates.</td>
           <td class="txt">See <a href="#terms">Provenance and terms</a></td>
         </tr>
       </tbody>
@@ -205,6 +217,82 @@
   </div>
   <figcaption>The Aria recording layout, release v4.0.0. Piece names are the keys of the official
   download manifest; the grouping of files into pieces is taken from it.</figcaption>
+
+  <h2 id="split">Two files per recording</h2>
+  <p>The release licenses its hand annotations under
+  <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a> and everything
+  else under <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>. One file
+  holding both cannot be licensed lawfully: BY-SA forbids imposing the extra NonCommercial
+  restriction on BY-SA material, and BY-NC-SA cannot be dropped from the hand data. So the derived
+  payload for a recording is written as two files, each carrying one licence, and a page that only
+  needs poses, boxes, points or gaze never loads the non-commercial half.</p>
+  <div class="table-wrap">
+    <table class="split">
+      <thead>
+        <tr>
+          <th class="no-sort">File</th>
+          <th class="no-sort">Licence</th>
+          <th class="no-sort">Fields</th>
+          <th class="no-sort">Loaded by</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="path">data/seq/&lt;SEQ&gt;.json</td>
+          <td class="txt">CC BY-SA 4.0</td>
+          <td class="txt"><span class="mono">v, dataset, license, device, seq, participant, F,
+          duration_s, fps, t, timecode_ns_first, headset, objects, cameras, streams, display_wh,
+          box_frame, have_gt, gaze, slam, points, masks, hands_file, summary</span>.
+          <span class="mono">masks</span> here is the five non-hand masks —
+          <span class="mono">qa_pass</span>, <span class="mono">good_exposure</span>,
+          <span class="mono">object_visible</span>, <span class="mono">headset_pose_available</span>,
+          <span class="mono">object_pose_available</span>.</td>
+          <td class="txt"><span class="mono">HOT3D.sequence(seq)</span></td>
+        </tr>
+        <tr>
+          <td class="path">data/hands/&lt;SEQ&gt;.hands.json</td>
+          <td class="txt">CC BY-NC-SA 4.0 — non-commercial</td>
+          <td class="txt"><span class="mono">v, dataset, license, seq, participant, F, hands, masks,
+          summary</span>. <span class="mono">hands.{left,right}</span> is
+          <span class="mono">{side, umetrack: {wrist_t, wrist_q, conf, frames, params, n_params},
+          boxes: {rgb|slam_left|slam_right: {xyxy, vis, frames_seen}}}</span>;
+          <span class="mono">masks</span> here is the two hand masks,
+          <span class="mono">hand_visible</span> and
+          <span class="mono">hand_pose_available</span>.</td>
+          <td class="txt"><span class="mono">HOT3D.hands(seq)</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <figcaption>Both files are <span class="mono">"v": 2</span>, cover the same
+  <span class="mono">F</span> frames on the same frame grid, and name the same
+  <span class="mono">seq</span> and <span class="mono">participant</span>, so row
+  <span class="mono">i</span> means the same frame in either.</figcaption>
+
+  <p>Two fields tie them together and state the terms:</p>
+  <dl class="dl">
+    <dt>license</dt>
+    <dd>A string in each file naming the licence that file is under and the modifications made to
+    the released material, so a copy of one file away from this repository still carries its terms.
+    Read from <span class="path" id="sExPath3">—</span> and its hand file now:<br>
+    <b>sequence file</b> — <span class="sub" id="sLicSeq">—</span><br>
+    <b>hand file</b> — <span class="sub" id="sLicHands">—</span></dd>
+    <dt>hands_file</dt>
+    <dd>In the sequence payload, the name of that recording's hand file inside
+    <span class="path">data/hands/</span> — <span class="mono" id="sHandsFile">—</span> here. It is a
+    bare filename, not a path, so the sequence payload does not assume where the hand files are
+    served from. The hand file has no back-pointer; its <span class="mono">seq</span> field is the
+    link.</dd>
+  </dl>
+
+  <p>MANO is the one annotation the release ships that this site does not republish in any file. The
+  release's <span class="path">mano_hand_pose_trajectory.jsonl</span> is covered by the
+  SMPL-X/MANO licence on top of HOT3D's own terms, which this repository is not in a position to
+  pass on, so only UmeTrack is carried. The hand payload keeps
+  <span class="mono">summary.mano_frames</span> and
+  <span class="mono">summary.mano_included</span> (<span class="mono">false</span>) so that a reader
+  can still see how much of the recording the release's MANO annotation covers:
+  <span id="sMano">—</span></p>
 
   <h2>Sizes</h2>
   <p>The full HOT3D release is about 920 GB: 526 GB for the 198 Aria recordings and 394 GB for the
@@ -296,13 +384,16 @@
     </table>
   </div>
   <figcaption>Sizes measured in your browser as this page loaded, except where the row says
-  otherwise. The 1.66 GB of source VRS behind a recording becomes a payload of a few MB.</figcaption>
+  otherwise. The 1.66 GB of source VRS behind a recording becomes two payload files of a few MB
+  together.</figcaption>
 
   <h2>From the release to the payload</h2>
-  <p>One extraction pass per recording writes <span class="path">data/seq/&lt;SEQ&gt;.json</span>;
-  the numbers below are read from <span class="path" id="sExPath">—</span> now, as an example.
-  Nothing is re-estimated anywhere in this pipeline — every pose, box and mask is the released
-  value, moved onto a common frame grid and re-encoded.</p>
+  <p>One extraction pass per recording writes both <span class="path">data/seq/&lt;SEQ&gt;.json</span>
+  and <span class="path">data/hands/&lt;SEQ&gt;.hands.json</span>; the split is the last thing the
+  pass does, and everything below is applied the same way on both sides of it. The numbers are read
+  from <span class="path" id="sExPath">—</span> and its hand file now, as an example. Nothing is
+  re-estimated anywhere in this pipeline — every pose, box and mask is the released value, moved
+  onto a common frame grid and re-encoded.</p>
   <ol class="steps">
     <li><b>The frame grid is the RGB stream.</b> Row <span class="mono">i</span> of every per-frame
     array on this site is RGB frame <span class="mono">i</span> of the VRS stream
@@ -315,6 +406,13 @@
     frame rate. Each pose, box and mask is taken from the nearest annotated timestamp, accepted only
     within 8 ms; beyond that the frame is left unannotated — NaN in a float array, 255 in a mask.
     <span id="s255">—</span></li>
+    <li><b>Hand annotations are written to a second file.</b> The UmeTrack wrist poses, joint
+    angles, confidences and 2D hand boxes, and the <span class="mono">hand_visible</span> and
+    <span class="mono">hand_pose_available</span> masks, go to
+    <span class="path">data/hands/&lt;SEQ&gt;.hands.json</span>; everything else stays in
+    <span class="path">data/seq/&lt;SEQ&gt;.json</span>. Both files are written from the same pass,
+    on the same frame grid, and each carries its own <span class="mono">license</span> string — see
+    <a href="#split">Two files per recording</a> for why.</li>
     <li><b>The MPS streams are mapped through the timecode.</b> SLAM and eye gaze are stamped in
     Aria device time while the annotations are stamped in the recording's timecode, so
     <span class="path">timecode_devicetime_mapping.csv</span> converts before sampling. The payload
@@ -341,11 +439,12 @@
     <span id="sCap">—</span></li>
   </ol>
 
-  <h3>Where the bytes go in one payload</h3>
+  <h3>Where the bytes go in the two payload files</h3>
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
+          <th class="no-sort">File</th>
           <th class="no-sort">Section</th>
           <th class="no-sort">What it is</th>
           <th class="no-sort num">Bytes</th>
@@ -353,11 +452,11 @@
           <th class="no-sort"></th>
         </tr>
       </thead>
-      <tbody id="payBody"><tr><td colspan="5" class="loading">loading…</td></tr></tbody>
+      <tbody id="payBody"><tr><td colspan="6" class="loading">loading…</td></tr></tbody>
     </table>
   </div>
-  <figcaption id="payCap">Composition of one sequence payload, measured from the file this page
-  fetched.</figcaption>
+  <figcaption id="payCap">Composition of the two payload files of one recording, measured from the
+  files this page fetched.</figcaption>
 
   <h2>Conventions a reader needs</h2>
   <dl class="dl">
@@ -389,9 +488,10 @@
   </dl>
 
   <h3>What is unannotated in one recording</h3>
-  <p>These counts are the point of the two conventions above. They are read from the payload for
-  <span class="path" id="sExPath2">—</span>, a recording that ships full ground truth — the gaps are
-  not defects, they are the hands leaving the cameras' view and the objects being occluded.</p>
+  <p>These counts are the point of the two conventions above. They are read from both payload files
+  of <span class="path" id="sExPath2">—</span>, a recording that ships full ground truth — the gaps
+  are not defects, they are the hands leaving the cameras' view and the objects being occluded. The
+  hand rows come from the hand file; the rest from the sequence file.</p>
   <div class="table-wrap">
     <table>
       <thead>
@@ -412,6 +512,7 @@
       <thead>
         <tr>
           <th class="no-sort">Mask</th>
+          <th class="no-sort">File</th>
           <th class="no-sort num">RGB true</th>
           <th class="no-sort num">RGB false</th>
           <th class="no-sort num">RGB 255</th>
@@ -419,11 +520,12 @@
           <th class="no-sort num">SLAM-R 255</th>
         </tr>
       </thead>
-      <tbody id="maskBody"><tr><td colspan="6" class="loading">loading…</td></tr></tbody>
+      <tbody id="maskBody"><tr><td colspan="7" class="loading">loading…</td></tr></tbody>
     </table>
   </div>
-  <figcaption>The seven quality masks of the same recording, per camera stream. A mask is released
-  per stream, so a frame can pass in one camera and fail in another.</figcaption>
+  <figcaption>The seven quality masks of the same recording, per camera stream, across the two
+  payload files. A mask is released per stream, so a frame can pass in one camera and fail in
+  another.</figcaption>
 
   <h2 id="terms">Provenance and terms</h2>
   <p>HOT3D is a release by Meta Reality Labs — see the
@@ -433,6 +535,69 @@
   download; the version behind this site is v4.0.0, and every Aria row in
   <span class="path">data/index.json</span> reports release version
   <span class="mono" id="sVer">—</span>.</p>
+
+  <h3>Licence</h3>
+  <p>That licence sets three regimes, and everything this site serves falls under one of them.</p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="no-sort">Material</th>
+          <th class="no-sort">Licence</th>
+          <th class="no-sort">Where it is here</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="txt">Sequence data — the camera streams and every annotation except the hand
+          annotations</td>
+          <td class="txt"><a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a></td>
+          <td class="txt"><span class="path">data/seq/</span>, <span class="path">media/</span>,
+          <span class="path">data/index.json</span></td>
+        </tr>
+        <tr>
+          <td class="txt">Hand annotations — wrist poses, joint angles, confidences, 2D hand boxes,
+          and the <span class="mono">hand_visible</span> and
+          <span class="mono">hand_pose_available</span> masks</td>
+          <td class="txt"><a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA
+          4.0</a> — <b>non-commercial</b></td>
+          <td class="txt"><span class="path">data/hands/</span>, and the
+          <a href="hands.html">Hands</a> page</td>
+        </tr>
+        <tr>
+          <td class="txt">3D object models</td>
+          <td class="txt"><a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+          with Meta's rider that the material <b>may not be sold</b>, nor incorporated into a
+          product that is sold</td>
+          <td class="txt"><span class="path">data/objects/</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <figcaption>The three data types named in the HOT3D Dataset License Agreement (last updated
+  29 May 2024), as shipped in <span class="path">license.txt</span> with every recording.</figcaption>
+
+  <p>The split of the derived payload into
+  <span class="path">data/seq/&lt;SEQ&gt;.json</span> and
+  <span class="path">data/hands/&lt;SEQ&gt;.hands.json</span> exists to keep the first two regimes
+  apart: a single file carrying both could not be licensed, because BY-SA does not permit the extra
+  NonCommercial restriction being imposed on BY-SA material. Each file names its own terms in its
+  <span class="mono">license</span> field. MANO parameters are not republished in either file: their
+  use is gated by the SMPL-X/MANO licence in addition to HOT3D's, so only UmeTrack ships here.</p>
+
+  <p>ShareAlike also requires that modifications be indicated. What was changed — the re-encoded
+  video, the resampling onto the RGB frame grid, the rotated boxes, the filtered points and the
+  decimated models — is listed on this page and stated again in
+  <a href="https://github.com/NussairHroub/hot3d-aria-viewer/blob/main/DATA_LICENSE.md">DATA_LICENSE.md</a>,
+  which is the licence notice for everything under <span class="path">data/</span> and
+  <span class="path">media/</span>. The site's own code is MIT and is not derived from the dataset.</p>
+
+  <p class="note">Attribution: HOT3D dataset, Meta Platforms Technologies, LLC. Prithviraj Banerjee
+  et al., <i>HOT3D: Hand and Object Tracking in 3D from Egocentric Multi-View Videos</i>, CVPR 2025
+  — <a href="https://arxiv.org/abs/2411.19167">arXiv:2411.19167</a>,
+  <a href="https://facebookresearch.github.io/hot3d/">facebookresearch.github.io/hot3d</a>.
+  Licensed under CC BY-SA 4.0, and CC BY-NC-SA 4.0 for the hand annotations, as stated in the HOT3D
+  Dataset License Agreement. The object models may not be sold.</p>
   <p>This site is not a mirror of the release. It serves derived visualisations of
   <span class="mono" id="sFeatN">—</span> of the <span class="mono" id="sAriaN">—</span> Aria
   recordings: a re-encoded 704 px video, a few MB of resampled annotations per recording, a thinned
@@ -453,7 +618,11 @@
     recording, both devices.</li>
     <li><b>Extract a payload per featured recording.</b> Resample the ground truth, the masks and
     the MPS streams onto the RGB frame grid as described above, and write each array as base64
-    float32 (uint8 for masks) into <span class="path">data/seq/&lt;SEQ&gt;.json</span>.</li>
+    float32 (uint8 for masks) into two files: the hand annotations and their two masks into
+    <span class="path">data/hands/&lt;SEQ&gt;.hands.json</span>, everything else into
+    <span class="path">data/seq/&lt;SEQ&gt;.json</span> with a
+    <span class="mono">hands_file</span> pointer and a <span class="mono">license</span> string in
+    each.</li>
     <li><b>Render media.</b> One 704 px mp4, one poster and twelve SLAM stills per featured
     recording, with a <span class="path">&lt;SEQ&gt;_media.json</span> recording the encode
     settings.</li>
@@ -520,6 +689,8 @@ async function headSize(path) {
 
     const payText = await text(`data/seq/${EX}.json`);
     const seq = JSON.parse(payText);
+    const handsText = await text(`data/hands/${seq.hands_file}`);
+    const hnd = JSON.parse(handsText);
     const objText = await text('data/objects.json');
     const objs = JSON.parse(objText);
     const mediaText = await text(`media/${EX}_media.json`);
@@ -535,6 +706,7 @@ async function headSize(path) {
     set('fMin', (featSecs / 60).toFixed(1));
     set('fVrs', featVrs.toFixed(1) + ' GB');
     set('fPay', bytes(payText.length));
+    set('fHands', bytes(handsText.length));
 
     set('sVrsIx', aria.reduce((a, r) => a + r.vrs_gb, 0).toFixed(2) + ' GB');
     set('sFeatN', feat.length);
@@ -542,8 +714,20 @@ async function headSize(path) {
     set('sGt', n(aria.filter(r => r.have_gt).length));
     const versions = [...new Set(aria.map(r => r.version))];
     set('sVer', versions.join(', '));
-    set('tUme', seq.hands.left.umetrack.n_params);
-    set('tMano', seq.hands.left.mano.n_params);
+    set('tUme', hnd.hands.left.umetrack.n_params);
+
+    /* ---------- the two-file split ---------- */
+    set('sExPath3', `data/seq/${EX}.json`);
+    set('sLicSeq', seq.license);
+    set('sLicHands', hnd.license);
+    set('sHandsFile', seq.hands_file);
+    const mf = hnd.summary.mano_frames;
+    const uf = { left: hnd.hands.left.umetrack.frames, right: hnd.hands.right.umetrack.frames };
+    const sameCover = mf.left === uf.left && mf.right === uf.right;
+    set('sMano', `${n(mf.left)} frames on the left hand and ${n(mf.right)} on the right, of ` +
+      `${n(hnd.F)} in ${EX}` + (sameCover
+        ? ' — the same frames UmeTrack covers in this recording, so nothing about when a hand was annotated is lost by leaving MANO out.'
+        : `, against ${n(uf.left)} and ${n(uf.right)} for UmeTrack.`));
 
     /* ---------- the twelve featured recordings ---------- */
     $('featBody').innerHTML = feat.map(r => tr([
@@ -577,7 +761,9 @@ async function headSize(path) {
       tr([td('<span class="path">data/index.json</span>'), td('1', 'num'), td(bytes(ixText.length), 'num'),
           td(`fetched here — ${n(ix.totals.recordings)} rows, ${n(ix.totals.aria)} Aria and ${n(ix.totals.quest)} Quest 3`, 'txt')]),
       tr([td('<span class="path">data/seq/&lt;SEQ&gt;.json</span>'), td(n(feat.length), 'num'), td(bytes(payText.length), 'num'),
-          td(`fetched here for ${esc(EX)}: ${Math.round(perFrame)} B per RGB frame. One file per featured recording`, 'txt')]),
+          td(`fetched here for ${esc(EX)}: ${Math.round(perFrame)} B per RGB frame. One file per featured recording, CC BY-SA 4.0`, 'txt')]),
+      tr([td('<span class="path">data/hands/&lt;SEQ&gt;.hands.json</span>'), td(n(feat.length), 'num'), td(bytes(handsText.length), 'num'),
+          td(`fetched here for ${esc(EX)}: ${Math.round(handsText.length / hnd.F)} B per RGB frame. The hand annotations, kept apart as CC BY-NC-SA 4.0`, 'txt')]),
       tr([td('<span class="path">data/objects.json</span>'), td('1', 'num'), td(bytes(objText.length), 'num'),
           td(`fetched here — the ${n(objs.objects.length)}-object index`, 'txt')]),
       tr([td('<span class="path">data/objects/&lt;uid&gt;.glb</span>'), td(n(objs.objects.length), 'num'), td(glbMb.toFixed(1) + ' MB', 'num'),
@@ -617,12 +803,18 @@ async function headSize(path) {
       ? `${atCap} of the ${objs.objects.length} models sit at the 40k cap; the rest were already below it and keep their released geometry.`
       : `No model in the library reached the 40k cap, so every mesh keeps its released geometry.`);
 
-    /* the 8 ms tolerance, shown where it actually bites */
+    /* every mask of this recording, across both payload files, with the file it lives in */
+    const allMasks = [
+      ...Object.keys(seq.masks).map(m => [m, 'seq', seq.masks[m]]),
+      ...Object.keys(hnd.masks).map(m => [m, 'hands', hnd.masks[m]]),
+    ];
     const streamsOf = (m) => Object.keys(seq.masks[m]);
+
+    /* the 8 ms tolerance, shown where it actually bites */
     let n255 = 0; const frames255 = new Set();
-    for (const m of Object.keys(seq.masks)) {
-      for (const st of streamsOf(m)) {
-        const a = HOT3D.u8(seq.masks[m][st]);
+    for (const [, , byStream] of allMasks) {
+      for (const st of Object.keys(byStream)) {
+        const a = HOT3D.u8(byStream[st]);
         for (let i = 0; i < a.length; i++) if (a[i] === 255) { n255++; frames255.add(i); }
       }
     }
@@ -641,30 +833,42 @@ async function headSize(path) {
       setHTML('s255', `${slamTxt}: ${n(n255)} mask entries here are 255, all at ${where}, which is exactly what the rule is for.`);
     }
 
-    /* ---------- payload composition ---------- */
+    /* ---------- payload composition, across the two files ---------- */
+    const nStreams = streamsOf('qa_pass').length;
     const sections = [
-      ['hands', 'wrist poses, joint angles, confidences and 2D boxes for both hands, both models'],
-      ['objects', 'pose per frame per object, plus a 2D box and visibility per camera'],
-      ['points', `semidense scene points (${n(seq.points.shown)} × 3 float32)`],
-      ['slam', 'the headset\'s own SLAM trajectory and quality, sampled at frame times'],
-      ['headset', 'motion-capture headset pose per frame'],
-      ['masks', `${Object.keys(seq.masks).length} quality masks × ${streamsOf('qa_pass').length} streams`],
-      ['gaze', 'per-eye yaw, pitch and gaze depth'],
-      ['t', 'the frame timeline in seconds'],
-      ['cameras', 'the released camera models, verbatim'],
+      ['seq', 'objects', 'pose per frame per object, plus a 2D box and visibility per camera'],
+      ['seq', 'points', `semidense scene points (${n(seq.points.shown)} × 3 float32)`],
+      ['seq', 'slam', 'the headset\'s own SLAM trajectory and quality, sampled at frame times'],
+      ['seq', 'headset', 'motion-capture headset pose per frame'],
+      ['seq', 'masks', `the ${Object.keys(seq.masks).length} non-hand quality masks × ${nStreams} streams`],
+      ['seq', 'gaze', 'per-eye yaw, pitch and gaze depth'],
+      ['seq', 't', 'the frame timeline in seconds'],
+      ['seq', 'cameras', 'the released camera models, verbatim'],
+      ['hands', 'hands', 'UmeTrack wrist poses, joint angles and confidences, plus 2D boxes, for both hands'],
+      ['hands', 'masks', `the ${Object.keys(hnd.masks).length} hand masks × ${Object.keys(hnd.masks.hand_visible).length} streams`],
     ];
-    const sized = sections.map(([k, what]) => [k, what, JSON.stringify(seq[k]).length]);
-    const known = sized.reduce((a, s) => a + s[2], 0);
-    sized.push(['(keys and scalars)', 'field names, identifiers, summary block', Math.max(payText.length - known, 0)]);
-    const max = Math.max(...sized.map(s => s[2]));
-    $('payBody').innerHTML = sized.sort((a, b) => b[2] - a[2]).map(([k, what, b]) => tr([
+    const srcOf = (f) => (f === 'seq' ? seq : hnd);
+    const sized = sections.map(([f, k, what]) => [f, k, what, JSON.stringify(srcOf(f)[k]).length]);
+    for (const [f, len] of [['seq', payText.length], ['hands', handsText.length]]) {
+      const known = sized.filter(s => s[0] === f).reduce((a, s) => a + s[3], 0);
+      sized.push([f, '(keys and scalars)', 'field names, identifiers, licence string, summary block',
+        Math.max(len - known, 0)]);
+    }
+    const total = payText.length + handsText.length;
+    const max = Math.max(...sized.map(s => s[3]));
+    const fileLabel = { seq: `data/seq/${EX}.json`, hands: `data/hands/${seq.hands_file}` };
+    $('payBody').innerHTML = sized.sort((a, b) => b[3] - a[3]).map(([f, k, what, b]) => tr([
+      td(`<span class="path">${esc(f === 'seq' ? 'seq' : 'hands')}</span>`),
       td(`<span class="mono">${esc(k)}</span>`),
       td(esc(what), 'txt'),
       td(n(b), 'num'),
-      td(HOT3D.fmt.pct(b / payText.length, 1), 'num'),
+      td(HOT3D.fmt.pct(b / total, 1), 'num'),
       td(`<span class="bar" style="width:${(100 * b / max).toFixed(1)}%"></span>`, 'barcell'),
     ])).join('');
-    set('payCap', `Composition of data/seq/${EX}.json — ${bytes(payText.length)} for ${n(seq.F)} frames, measured in your browser. The two hand models and the ${seq.objects.length} object tracks dominate; the point cloud is a single fixed-size block.`);
+    set('payCap', `Composition of ${fileLabel.seq} (${bytes(payText.length)}) and ` +
+      `${fileLabel.hands} (${bytes(handsText.length)}) — ${bytes(total)} together for ${n(seq.F)} ` +
+      `frames, measured in your browser. Shares are of that combined total. The ${seq.objects.length} ` +
+      `object tracks and the two hands dominate; the point cloud is a single fixed-size block.`);
 
     /* ---------- conventions, from the payload ---------- */
     set('sBoxFrame', `"${seq.box_frame}"`);
@@ -684,12 +888,10 @@ async function headSize(path) {
       ['SLAM trajectory (MPS)', countFinite(seq.slam.T, 3)],
       ['SLAM pose quality score', countFinite(seq.slam.quality, 1)],
       [`eye gaze (${seq.gaze.source})`, countFinite(seq.gaze.depth, 1)],
-      ['left wrist, UmeTrack', seq.hands.left.umetrack.frames],
-      ['right wrist, UmeTrack', seq.hands.right.umetrack.frames],
-      ['left wrist, MANO', seq.hands.left.mano.frames],
-      ['right wrist, MANO', seq.hands.right.mano.frames],
-      ['left hand box, RGB', seq.hands.left.boxes.rgb.frames_seen],
-      ['right hand box, RGB', seq.hands.right.boxes.rgb.frames_seen],
+      ['left wrist, UmeTrack (hand file)', hnd.hands.left.umetrack.frames],
+      ['right wrist, UmeTrack (hand file)', hnd.hands.right.umetrack.frames],
+      ['left hand box, RGB (hand file)', hnd.hands.left.boxes.rgb.frames_seen],
+      ['right hand box, RGB (hand file)', hnd.hands.right.boxes.rgb.frames_seen],
     ];
     for (const o of seq.objects) avail.push([`${o.name} pose`, o.frames_with_pose]);
     $('nanBody').innerHTML = avail.map(([label, k]) => tr([
@@ -705,11 +907,12 @@ async function headSize(path) {
       for (let i = 0; i < a.length; i++) c[a[i]] = (c[a[i]] || 0) + 1;
       return c;
     };
-    $('maskBody').innerHTML = Object.keys(seq.masks).map(m => {
-      const r = counts(seq.masks[m].rgb);
-      const l = counts(seq.masks[m].slam_left), rr = counts(seq.masks[m].slam_right);
+    $('maskBody').innerHTML = allMasks.map(([m, file, byStream]) => {
+      const r = counts(byStream.rgb);
+      const l = counts(byStream.slam_left), rr = counts(byStream.slam_right);
       return tr([
         td(`<span class="mono">${esc(m)}</span>`),
+        td(`<span class="path">${esc(file)}</span>`),
         td(n(r[1] || 0), 'num'), td(n(r[0] || 0), 'num'), td(n(r[255] || 0), 'num'),
         td(n(l[255] || 0), 'num'), td(n(rr[255] || 0), 'num'),
       ]);
