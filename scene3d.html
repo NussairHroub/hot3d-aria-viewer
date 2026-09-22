@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>3D scene · HOT3D Aria</title>
-<meta name="description" content="A HOT3D Aria recording in world coordinates: semidense scene points, the headset path and camera field, object poses as oriented boxes, and both wrists, played on a timeline.">
+<meta name="description" content="A HOT3D Aria recording in world coordinates: semidense scene points, the headset path and camera field, object poses as oriented boxes and axis triads, and both wrists, played on a timeline.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -130,6 +130,7 @@
         <tr><td>Headset path</td><td class="mono">headset.T, headset.Q</td><td>A line through the motion-capture headset position at every frame, plus the device axis triad at the current frame.</td></tr>
         <tr><td>RGB field</td><td class="mono">cameras[camera-rgb]</td><td>The released <span class="mono">T_Device_Camera</span> applied to the headset pose; the cone half-angle is the released <span class="mono">maxSolidAngle</span>, not a guess.</td></tr>
         <tr><td>Objects</td><td class="mono">objects[].T, .Q</td><td>An oriented box with the object's <span class="mono">extent_m</span> from <span class="mono">data/objects.json</span>, centred on the model's own bounding-box centre, placed by the released pose.</td></tr>
+        <tr><td>Object axes</td><td class="mono">objects[].T, .Q</td><td>The same released pose drawn as the object's own axes — X <span style="color:#e5484d">red</span>, Y <span style="color:#3fb950">green</span>, Z <span style="color:#4c8dff">blue</span> — as solid arrows, each half the object's longest side. Orientation is what a wireframe box cannot show; the axes are the model frame the release ships, so they are comparable across frames of one object, not between different objects.</td></tr>
         <tr><td>Wrists</td><td class="mono">hands.{left,right}.umetrack<br>in data/hands/&lt;seq&gt;.hands.json</td><td>A sphere at <span class="mono">wrist_t</span>, a cross showing the three axes of <span class="mono">wrist_q</span>, and a one-second trailing path. This is the one layer that comes from a second file: hand annotations carry their own licence, so they are never merged into the payload.</td></tr>
         <tr><td>MPS SLAM</td><td class="mono">slam.T</td><td>A dashed line through the headset's own closed-loop trajectory, sampled at frame times.</td></tr>
       </tbody>
@@ -184,6 +185,7 @@ const LAYERS = [
   ['path',    'Headset path', '--c-headset'],
   ['frustum', 'RGB camera field', '--c-headset'],
   ['objects', 'Object boxes', '--c-object'],
+  ['axes',    'Object axes', '--c-object'],
   ['hands',   'Wrists', '--c-hand'],
   ['slam',    'MPS SLAM path', '--ink-2'],
 ];
@@ -533,6 +535,32 @@ async function load(seq) {
   }
   groups.frustum.add(rigNode);
 
+  /* An object's own X, Y and Z at its released pose, drawn the way pose papers draw them. Built
+     from cylinders and cones rather than lines: a line is one device pixel wide no matter what
+     linewidth says, which is why the wireframe boxes read as scribble. */
+  const AXIS_RGB = [0xe5484d, 0x3fb950, 0x4c8dff];          // X, Y, Z — the usual convention
+  function axisTriad(len) {
+    const g = new THREE.Group();
+    const shaft = Math.max(len * 0.035, 0.0035);            // scales with the object, with a floor
+    for (let a = 0; a < 3; a++) {
+      const mat = new THREE.MeshBasicMaterial({ color: AXIS_RGB[a] });
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(shaft, shaft, len * 0.78, 10), mat);
+      const head = new THREE.Mesh(new THREE.ConeGeometry(shaft * 2.6, len * 0.22, 12), mat);
+      body.position.y = len * 0.39;
+      head.position.y = len * 0.89;
+      const arm = new THREE.Group();
+      arm.add(body, head);
+      // the geometry points along +Y; turn it onto the axis it stands for
+      if (a === 0) arm.rotation.z = -Math.PI / 2;
+      if (a === 2) arm.rotation.x = Math.PI / 2;
+      g.add(arm);
+    }
+    // a small ball at the origin, so the pose's position reads even when the arms are foreshortened
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(Math.max(len * 0.06, 0.005), 12, 10),
+                         new THREE.MeshBasicMaterial({ color: 0xffffff })));
+    return g;
+  }
+
   /* objects: oriented boxes at the released poses. The model bounds come from each glb's header,
      so the fetches all start together rather than one object at a time. */
   const centres = new Map();
@@ -557,8 +585,12 @@ async function load(seq) {
       poseNode.add(shell, edges);
     }
     groups.objects.add(poseNode);
+    // half the object's longest side: long enough to read, short enough to stay its own object's
+    const axisLen = Math.min(Math.max(size ? Math.max(size[0], size[1], size[2]) / 2 : 0.06, 0.035), 0.16);
+    const axisNode = axisTriad(axisLen);
+    groups.axes.add(axisNode);
     objs.push({
-      name: o.name, uid: o.uid, node: poseNode, centre: c, measured, size,
+      name: o.name, uid: o.uid, node: poseNode, axisNode, centre: c, measured, size,
       T: HOT3D.f32(o.T, 3), Q: HOT3D.f32(o.Q, 4),
       vis: HOT3D.f32(o.boxes.rgb.vis), travel: o.travel_m, framesWithPose: o.frames_with_pose,
       world: new THREE.Vector3(),
@@ -613,14 +645,33 @@ async function load(seq) {
 
   /* frame the scene: look at where the objects are, from far enough to hold the head path too */
   const work = new THREE.Box3().makeEmpty();
+  const wx = [], wy = [], wz = [];
   for (const o of objs) for (let i = 0; i < F; i += 5) {
-    if (finite3(o.T[i])) work.expandByPoint(vtmp.set(o.T[i][0] + o.centre[0], o.T[i][1] + o.centre[1], o.T[i][2] + o.centre[2]));
+    if (!finite3(o.T[i])) continue;
+    wx.push(o.T[i][0] + o.centre[0]); wy.push(o.T[i][1] + o.centre[1]); wz.push(o.T[i][2] + o.centre[2]);
   }
-  const c = (work.isEmpty() ? bounds : work).getCenter(new THREE.Vector3());
-  const r = Math.max(bounds.getSize(new THREE.Vector3()).length() * 0.5, 0.6);
+  if (wx.length >= 20) {
+    // the middle 80% of where the objects are, not their full range: one object carried across
+    // the room would otherwise set the opening zoom for all of them
+    const band = (arr) => {
+      const a = arr.slice().sort((p, q) => p - q);
+      return [a[Math.floor(a.length * 0.1)], a[Math.floor(a.length * 0.9)]];
+    };
+    const [x0, x1] = band(wx), [y0, y1] = band(wy), [z0, z1] = band(wz);
+    work.set(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1));
+  } else {
+    for (let k = 0; k < wx.length; k++) work.expandByPoint(vtmp.set(wx[k], wy[k], wz[k]));
+  }
+  const framed = work.isEmpty() ? bounds : work;
+  const c = framed.getCenter(new THREE.Vector3());
+  // Frame where the objects actually are, not the whole room: the scene bounds include the
+  // semidense cloud and the full head path, and starting that far out left the object poses a
+  // few pixels across. Scroll out for the room; the point of the opening view is the objects.
+  const r = Math.max(framed.getSize(new THREE.Vector3()).length() * 0.5, 0.45);
+  const roomR = Math.max(bounds.getSize(new THREE.Vector3()).length() * 0.5, r);
   controls.target.copy(c);
-  camera.position.copy(c).add(new THREE.Vector3(0.95, -1.25, 0.95).normalize().multiplyScalar(r * 1.7));
-  camera.near = 0.03; camera.far = Math.max(60, r * 40);
+  camera.position.copy(c).add(new THREE.Vector3(0.95, -1.25, 0.95).normalize().multiplyScalar(r * 2.1));
+  camera.near = 0.02; camera.far = Math.max(60, roomR * 40);
   camera.updateProjectionMatrix();
   controls.update();
 
@@ -657,6 +708,7 @@ function setFrame(i, force) {
   setPose(rigNode, hT, hQ, i);
   setPose(headNode, hT, hQ, i);
   for (const o of objs) {
+    if (o.axisNode) setPose(o.axisNode, o.T, o.Q, i);
     if (setPose(o.node, o.T, o.Q, i)) {
       o.world.set(o.centre[0], o.centre[1], o.centre[2]).applyQuaternion(o.node.quaternion).add(o.node.position);
       o.here = true;
