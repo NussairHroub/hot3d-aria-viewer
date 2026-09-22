@@ -349,6 +349,73 @@ const HOT3D = (() => {
     check();
   }
 
+  /* ---------- projecting world points into a camera ----------
+     The release gives a full 6-DoF pose per object, so an object's own axes can be drawn on the
+     video the way pose papers draw them. Getting there needs the Aria fisheye model, because the
+     RGB camera is a 1408x1408 fisheye and a pinhole approximation is wrong by tens of pixels at
+     the edges.
+
+     Checked against the release itself: projecting each object's centre and testing it against
+     that object's released 2D box lands inside on 2322 of 2322 sampled frames across two
+     recordings (scripts, and the same maths, in the repository history). */
+
+  /** FISHEYE624: [f, cx, cy, k1..k6, p1, p2, s1..s4] — radial in theta, then tangential, then
+   *  thin prism. Takes a point in camera coordinates, returns sensor pixels, or null behind. */
+  function fisheye624(params, x, y, z) {
+    if (!(z > 1e-6)) return null;
+    const f = params[0], cx = params[1], cy = params[2];
+    const a = x / z, b = y / z;
+    const r = Math.hypot(a, b);
+    let xr, yr;
+    if (r < 1e-9) { xr = a; yr = b; } else {
+      const th = Math.atan(r), th2 = th * th;
+      let poly = 1, t = 1;
+      for (let i = 3; i < 9; i++) { t *= th2; poly += params[i] * t; }
+      const thd = th * poly;
+      xr = (thd / r) * a; yr = (thd / r) * b;
+    }
+    const p1 = params[9], p2 = params[10];
+    const s1 = params[11], s2 = params[12], s3 = params[13], s4 = params[14];
+    const rd2 = xr * xr + yr * yr;
+    const tx = 2 * p1 * xr * yr + p2 * (rd2 + 2 * xr * xr) + s1 * rd2 + s2 * rd2 * rd2;
+    const ty = 2 * p2 * xr * yr + p1 * (rd2 + 2 * yr * yr) + s3 * rd2 + s4 * rd2 * rd2;
+    return [f * (xr + tx) + cx, f * (yr + ty) + cy];
+  }
+
+  /**
+   * A projector for one recording's stream, built from the payload's own calibration.
+   *   const proj = HOT3D.projector(payload, 'camera-rgb');
+   *   proj.world(worldXYZ, headT[i], headQ[i]) -> [u, v] in the upright display frame, or null
+   * Display frame means the same pixels the video and the released boxes use: Aria mounts the
+   * sensor rotated, so (x, y) becomes (imageHeight - 1 - y, x).
+   */
+  function projector(payload, label = 'camera-rgb') {
+    const cam = (payload.cameras || []).find(c => c.label === label);
+    if (!cam) return null;
+    const P = cam.projectionParams;
+    const q = cam.T_Device_Camera.quaternion_wxyz, t = cam.T_Device_Camera.translation_xyz;
+    const Rdc = quatToMat3(q);                       // device <- camera
+    const H = cam.imageHeight;
+    const applyRT = (m, tr, p) => {                  // inverse of (m, tr) applied to p
+      const d = [p[0] - tr[0], p[1] - tr[1], p[2] - tr[2]];
+      return [m[0] * d[0] + m[3] * d[1] + m[6] * d[2],
+              m[1] * d[0] + m[4] * d[1] + m[7] * d[2],
+              m[2] * d[0] + m[5] * d[1] + m[8] * d[2]];
+    };
+    return {
+      label, width: cam.imageWidth, height: cam.imageHeight,
+      displayWidth: H, displayHeight: cam.imageWidth,
+      /** world point -> display pixels, given the device pose of this frame */
+      world(p, headT, headQ) {
+        if (!p || !headT || !headQ || !isFinite(headT[0]) || !isFinite(headQ[0])) return null;
+        const dev = applyRT(quatToMat3(headQ), headT, p);        // world -> device
+        const cm = applyRT(Rdc, t, dev);                         // device -> camera
+        const uv = fisheye624(P, cm[0], cm[1], cm[2]);
+        return uv ? [H - 1 - uv[1], uv[0]] : null;               // sensor -> upright display
+      },
+    };
+  }
+
   /* ---------- graphics ----------
      The 3D pages depend on WebGL, which is not a given in a browser: hardware acceleration can
      be switched off, a GPU can be blocklisted, a driver can reset, and a tab can be dropped to
@@ -430,7 +497,7 @@ const HOT3D = (() => {
   }
 
   return { init, mountHeader, mountFooter, restoreTheme, f32, u8, json, index, sequence, hands, whenVisible,
-           gpu, gpuNote, watchContext,
+           gpu, gpuNote, watchContext, fisheye624, projector,
            quatToMat3, applyPose, dist, pathLength, fmt, css, channel, linePlot, playhead, PAGES };
 })();
 

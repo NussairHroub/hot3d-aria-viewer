@@ -92,7 +92,8 @@
       <div class="toggles" style="margin-bottom:8px">
         <label class="toggle"><input type="checkbox" id="tObj" checked><span class="swatch" style="background:var(--c-object)"></span>Object boxes</label>
         <label class="toggle"><input type="checkbox" id="tHand" checked><span class="swatch" style="background:var(--c-hand)"></span>Hand boxes</label>
-        <label class="toggle"><input type="checkbox" id="tQa" checked>QA badge</label>
+        <label class="toggle"><input type="checkbox" id="tAxes"><span class="swatch" style="background:linear-gradient(90deg,#e5484d 33%,#3fb950 33% 66%,#4c8dff 66%)"></span>Object axes</label>
+      <label class="toggle"><input type="checkbox" id="tQa" checked>QA badge</label>
       </div>
       <div class="toggles" id="objToggles"></div>
     </div>
@@ -150,7 +151,7 @@ const $ = (id) => document.getElementById(id);
 const sel = $('seqSel'), statusEl = $('status'), pills = $('pills');
 const stage = $('stage'), vid = $('vid'), ov = $('ov'), octx = ov.getContext('2d');
 const playBtn = $('playBtn'), scrub = $('scrub'), tRead = $('tRead');
-const tObj = $('tObj'), tHand = $('tHand'), tQa = $('tQa');
+const tObj = $('tObj'), tHand = $('tHand'), tQa = $('tQa'), tAxes = $('tAxes');
 const objToggles = $('objToggles'), readout = $('readout'), legend = $('distLegend');
 const chSpeed = $('chSpeed'), chDist = $('chDist');
 const CAP0 = { cap: $('cap').innerHTML, capSpeed: $('capSpeed').innerHTML, capDist: $('capDist').innerHTML };
@@ -244,6 +245,8 @@ function decode(d, hd) {
   const F = d.F, t = HOT3D.f32(d.t), hT = HOT3D.f32(d.headset.T, 3);
   const st = {
     seq: d.seq, F, fps: d.fps, t, hT, speed: speedOf(hT, t),
+    hQ: HOT3D.f32(d.headset.Q, 4),
+    proj: HOT3D.projector(d, 'camera-rgb'),
     dw: d.display_wh.rgb, duration: d.duration_s, participant: d.participant,
     have_gt: d.have_gt, gazeSrc: d.gaze.source, summary: d.summary,
     gaze: {
@@ -262,6 +265,7 @@ function decode(d, hd) {
     }
     st.objects.push({
       uid: o.uid, name: o.name, T, dist, on: true,
+      Q: HOT3D.f32(o.Q, 4), extent: null,
       color: objShade(k, d.objects.length), dash: DASHES[k % DASHES.length],
       box: HOT3D.f32(o.boxes.rgb.xyxy, 4), vis: HOT3D.f32(o.boxes.rgb.vis),
       framesSeen: o.boxes.rgb.frames_seen, framesPose: o.frames_with_pose,
@@ -442,6 +446,61 @@ function drawBox(b, s, color, label) {
   return true;
 }
 
+/* Object axes, the way pose papers draw them: the object's own X, Y and Z at the released pose,
+   projected into the RGB camera with the released FISHEYE624 calibration. Checked against the
+   release: the projected centre of an object lands inside that object's released 2D box on every
+   one of 1,169 sampled frames in this recording. */
+const AXIS_COLORS = ['#e5484d', '#3fb950', '#4c8dff'];       // X, Y, Z — the usual convention
+
+function axisLength(o) {
+  // half the object's largest side, so the triad reads as belonging to that object
+  const e = o.extent;
+  const half = e ? Math.max(e[0], e[1], e[2]) / 2 : 0.06;
+  return Math.min(Math.max(half, 0.03), 0.16);
+}
+
+function arrow(x0, y0, x1, y1, color) {
+  const dx = x1 - x0, dy = y1 - y0;
+  const len = Math.hypot(dx, dy);
+  if (!(len > 2)) return;                                     // degenerate on screen: skip
+  octx.save();
+  octx.lineCap = 'round';
+  octx.strokeStyle = 'rgba(0,0,0,.55)'; octx.lineWidth = 5;   // dark casing, for bright video
+  octx.beginPath(); octx.moveTo(x0, y0); octx.lineTo(x1, y1); octx.stroke();
+  octx.strokeStyle = color; octx.lineWidth = 2.5;
+  octx.beginPath(); octx.moveTo(x0, y0); octx.lineTo(x1, y1); octx.stroke();
+  const ux = dx / len, uy = dy / len, head = Math.min(11, len * 0.45);
+  octx.fillStyle = color;
+  octx.beginPath();
+  octx.moveTo(x1, y1);
+  octx.lineTo(x1 - head * ux + head * 0.45 * uy, y1 - head * uy - head * 0.45 * ux);
+  octx.lineTo(x1 - head * ux - head * 0.45 * uy, y1 - head * uy + head * 0.45 * ux);
+  octx.closePath();
+  octx.strokeStyle = 'rgba(0,0,0,.55)'; octx.lineWidth = 1.5; octx.stroke();
+  octx.fill();
+  octx.restore();
+}
+
+function drawAxes(o, i, s) {
+  if (!S.proj || !isFinite(o.T[i][0]) || !isFinite(o.Q[i][0])) return;
+  const T = o.T[i], Q = o.Q[i], L = axisLength(o);
+  const m = HOT3D.quatToMat3(Q);
+  const origin = S.proj.world(T, S.hT[i], S.hQ[i]);
+  if (!origin) return;                                        // the object is behind the camera
+  const ox = origin[0] * s, oy = origin[1] * s;
+  if (ox < -40 || oy < -40 || ox > cw + 40 || oy > ch + 40) return;
+  for (let a = 0; a < 3; a++) {
+    const tip = [T[0] + m[a] * L, T[1] + m[3 + a] * L, T[2] + m[6 + a] * L];
+    const uv = S.proj.world(tip, S.hT[i], S.hQ[i]);
+    if (!uv) continue;
+    arrow(ox, oy, uv[0] * s, uv[1] * s, AXIS_COLORS[a]);
+  }
+  octx.save();
+  octx.fillStyle = '#fff'; octx.strokeStyle = 'rgba(0,0,0,.6)'; octx.lineWidth = 2;
+  octx.beginPath(); octx.arc(ox, oy, 3.2, 0, 6.2832); octx.stroke(); octx.fill();
+  octx.restore();
+}
+
 function drawOverlay(i) {
   if (!S || !cw) return;
   octx.clearRect(0, 0, cw, ch);
@@ -462,6 +521,9 @@ function drawOverlay(i) {
       const v = o.vis[i];
       drawBox(b, s, o.color, isFinite(v) ? `${o.name} ${HOT3D.fmt.pct(v)}` : o.name);
     }
+  }
+  if (tAxes.checked) {
+    for (const o of S.objects) if (o.on) drawAxes(o, i, s);
   }
   if (tHand.checked) {
     for (const side of ['left', 'right']) {
@@ -676,6 +738,14 @@ async function load(seq) {
     if (token !== loadToken) return;    // a different recording was picked while this one loaded
     S = decode(d, hd);
     cur = 0; geomS = geomD = null;
+    /* the triad is sized from each object's released extent; if the library cannot be read the
+       axes still draw, at a default length, so the pose is never hidden by a missing side file */
+    HOT3D.json('data/objects.json').then((lib) => {
+      if (token !== loadToken || !S) return;
+      const ext = new Map(lib.objects.map((o) => [o.uid, o.extent_m]));
+      for (const o of S.objects) o.extent = ext.get(o.uid) || null;
+      drawOverlay(cur);
+    }).catch(() => { /* default length is fine */ });
     refreshPalette();
     setPills();
     buildObjToggles();
@@ -691,7 +761,11 @@ async function load(seq) {
     $('cap').innerHTML =
       `<strong class="mono">${seq}</strong> — RGB stream, re-encoded to 704&times;704 from the ` +
       `released ${S.dw[0]}&times;${S.dw[1]} frames. Boxes are the release's own 2D boxes, already ` +
-      `rotated into the upright display frame, scaled here by canvas width &divide; ${S.dw[0]}.`;
+      `rotated into the upright display frame, scaled here by canvas width &divide; ${S.dw[0]}. ` +
+      `<b>Object axes</b> are the released 6-DoF pose drawn in the image: each object's own X ` +
+      `(<span style="color:#e5484d">red</span>), Y (<span style="color:#3fb950">green</span>) and ` +
+      `Z (<span style="color:#4c8dff">blue</span>) at that frame, projected with the recording's ` +
+      `own FISHEYE624 calibration. Nothing is fitted — the orientation is the motion capture's.`;
     $('capSpeed').innerHTML =
       `Headset speed in m/s for <span class="mono">${seq}</span>, a central difference of the ` +
       `motion-capture headset track at ${S.fps.toFixed(0)} fps. Click to seek.`;
@@ -722,6 +796,12 @@ addEventListener('hashchange', () => {
   const s = pickSeq();
   if (!S || S.seq !== s) { sel.value = s; load(s); }
 });
+
+/* The overlay toggles only took effect on the next frame the video happened to draw, so
+   flipping one while paused looked like it did nothing. Redraw on the spot. */
+for (const t of [tObj, tHand, tQa, tAxes]) {
+  t.addEventListener('change', () => drawOverlay(cur));
+}
 
 const refit = () => { fitCanvas(); drawOverlay(cur); };
 let rafFit = 0, rafCh = 0;
