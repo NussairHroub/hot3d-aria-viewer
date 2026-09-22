@@ -32,6 +32,10 @@ MASK_FILES = ["mask_qa_pass", "mask_good_exposure", "mask_hand_visible", "mask_o
 # The release licenses hand annotations separately (CC BY-NC-SA) from everything else
 # (CC BY-SA), so they are written to their own file and never mixed into the main payload.
 HAND_MASKS = ("hand_visible", "hand_pose_available")
+# The RGB camera is what the viewer plays, so its boxes travel in the main payload. The two
+# monochrome SLAM cameras' boxes are two thirds of that payload's bytes and no page draws them,
+# so they are published beside it instead of inside it.
+MAIN_BOX_STREAM = "rgb"
 LIC_SEQUENCE = ("HOT3D sequence data and non-hand annotations, (c) Meta Platforms Technologies, "
                 "LLC, CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/); modified: "
                 "resampled onto the RGB frame grid, boxes rotated to the upright frame, points "
@@ -346,6 +350,8 @@ def main(seq_dir, out_path):
         box_obj[c] = to_float(box_obj[c])
 
     objects = []
+    side_boxes = {}          # object uid -> {slam_left|slam_right: box record}
+    hand_side_boxes = {}     # hand side  -> {slam_left|slam_right: box record}
     for uid, name, bop in zip(meta["object_uids"], meta["object_names"], meta["object_bop_uids"]):
         T, Q = poses_on_timeline(obj_cols, timeline, uid_filter=float(uid))
         present = np.isfinite(T).all(1)
@@ -359,9 +365,13 @@ def main(seq_dir, out_path):
             box, vis = boxes_on_timeline(box_obj, timeline, sid, "object_uid", uid,
                                          sensor_hw.get(sid))
             seen = np.isfinite(box).all(1)
-            if seen.any():
-                entry["boxes"][label] = {"xyxy": b64(box), "vis": b64(vis),
-                                         "frames_seen": int(seen.sum())}
+            if not seen.any():
+                continue
+            rec = {"xyxy": b64(box), "vis": b64(vis), "frames_seen": int(seen.sum())}
+            if label == MAIN_BOX_STREAM:
+                entry["boxes"][label] = rec
+            else:
+                side_boxes.setdefault(uid, {})[label] = rec
         objects.append(entry)
 
     box_hand = read_csv(os.path.join(seq_dir, "box2d_hands.csv"), dtype=object)
@@ -390,9 +400,13 @@ def main(seq_dir, out_path):
             box, vis = boxes_on_timeline(box_hand, timeline, sid, "hand_index", str(h),
                                          sensor_hw.get(sid))
             seen = np.isfinite(box).all(1)
-            if seen.any():
-                rec["boxes"][label] = {"xyxy": b64(box), "vis": b64(vis),
-                                       "frames_seen": int(seen.sum())}
+            if not seen.any():
+                continue
+            entry_box = {"xyxy": b64(box), "vis": b64(vis), "frames_seen": int(seen.sum())}
+            if label == MAIN_BOX_STREAM:
+                rec["boxes"][label] = entry_box
+            else:
+                hand_side_boxes.setdefault(side, {})[label] = entry_box
         hands[side] = rec
 
     gaze = gaze_on_timeline(seq_dir, timeline, timecode_to_device)
@@ -431,6 +445,7 @@ def main(seq_dir, out_path):
     # a compact summary so the index and the tables never have to decode the arrays
     qa = masks.get("qa_pass", {}).get("rgb")
     payload["hands_file"] = f"{seq}.hands.json"
+    payload["slam_boxes_file"] = f"{seq}.boxes2d.json"
     payload["summary"] = {
         "frames": F, "duration_s": payload["duration_s"], "fps": payload["fps"],
         "objects": len(objects),
@@ -448,6 +463,7 @@ def main(seq_dir, out_path):
                   for side, rec in hands.items()},
         "masks": {k: {s: b64(v, "|u1") for s, v in d.items()}
                   for k, d in masks.items() if k in HAND_MASKS},
+        "slam_boxes_file": f"{seq}.slam_boxes.json",
         "summary": {"frames": F,
                     "hand_frames": {s: hands[s]["umetrack"]["frames"] for s in hands},
                     "mano_frames": {s: hands[s]["mano"]["frames"] for s in hands},
@@ -458,8 +474,25 @@ def main(seq_dir, out_path):
     with open(out_path + ".tmp", "w") as f:
         json.dump(payload, f, separators=(",", ":"))
     os.replace(out_path + ".tmp", out_path)
-    hands_dir = os.path.join(os.path.dirname(os.path.dirname(out_path)), "hands")
+    data_dir = os.path.dirname(os.path.dirname(out_path))
+    boxes_dir = os.path.join(data_dir, "boxes2d")
+    os.makedirs(boxes_dir, exist_ok=True)
+    boxes_doc = {"v": 1, "dataset": "HOT3D", "license": LIC_SEQUENCE, "seq": seq, "F": F,
+                 "note": ("2D boxes in the two monochrome SLAM cameras, in the upright display "
+                          "frame. The RGB camera's boxes are in the main payload."),
+                 "display_wh": {k: v for k, v in display_wh.items() if k != MAIN_BOX_STREAM},
+                 "objects": side_boxes}
+    with open(os.path.join(boxes_dir, f"{seq}.boxes2d.json"), "w") as f:
+        json.dump(boxes_doc, f, separators=(",", ":"))
+
+    hands_dir = os.path.join(data_dir, "hands")
     os.makedirs(hands_dir, exist_ok=True)
+    hand_boxes_doc = {"v": 1, "dataset": "HOT3D", "license": LIC_HANDS, "seq": seq, "F": F,
+                      "note": ("2D hand boxes in the two monochrome SLAM cameras, in the upright "
+                               "display frame. The RGB camera's boxes are in the hand payload."),
+                      "hands": hand_side_boxes}
+    with open(os.path.join(hands_dir, f"{seq}.slam_boxes.json"), "w") as f:
+        json.dump(hand_boxes_doc, f, separators=(",", ":"))
     hands_path = os.path.join(hands_dir, f"{seq}.hands.json")
     with open(hands_path + ".tmp", "w") as f:
         json.dump(hands_payload, f, separators=(",", ":"))

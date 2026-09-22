@@ -218,14 +218,19 @@
   <figcaption>The Aria recording layout, release v4.0.0. Piece names are the keys of the official
   download manifest; the grouping of files into pieces is taken from it.</figcaption>
 
-  <h2 id="split">Two files per recording</h2>
+  <h2 id="split">Four files per recording</h2>
   <p>The release licenses its hand annotations under
   <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a> and everything
   else under <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>. One file
   holding both cannot be licensed lawfully: BY-SA forbids imposing the extra NonCommercial
   restriction on BY-SA material, and BY-NC-SA cannot be dropped from the hand data. So the derived
-  payload for a recording is written as two files, each carrying one licence, and a page that only
-  needs poses, boxes, points or gaze never loads the non-commercial half.</p>
+  payload for a recording is written as separate files, each carrying one licence, and a page that
+  only needs poses, boxes, points or gaze never loads the non-commercial half.</p>
+  <p>A second split is about weight rather than licensing. Two thirds of the first payload was 2D
+  boxes for the two monochrome SLAM cameras, which no page on this site draws — the viewer plays
+  the RGB stream. Those boxes are published beside the payload instead of inside it, which is why
+  the sequence file carries only <span class="mono">boxes.rgb</span>. The numbers are unchanged;
+  they are one fetch further away.</p>
   <div class="table-wrap">
     <table class="split">
       <thead>
@@ -250,16 +255,35 @@
           <td class="txt"><span class="mono">HOT3D.sequence(seq)</span></td>
         </tr>
         <tr>
+          <td class="path">data/boxes2d/&lt;SEQ&gt;.boxes2d.json</td>
+          <td class="txt">CC BY-SA 4.0</td>
+          <td class="txt"><span class="mono">v, dataset, license, seq, F, note, display_wh,
+          objects</span>, where <span class="mono">objects</span> maps an object uid to
+          <span class="mono">{slam_left|slam_right: {xyxy, vis, frames_seen}}</span> — the object
+          boxes in the two monochrome cameras.</td>
+          <td class="txt">No page yet; published for completeness</td>
+        </tr>
+        <tr>
           <td class="path">data/hands/&lt;SEQ&gt;.hands.json</td>
           <td class="txt">CC BY-NC-SA 4.0 — non-commercial</td>
           <td class="txt"><span class="mono">v, dataset, license, seq, participant, F, hands, masks,
           summary</span>. <span class="mono">hands.{left,right}</span> is
           <span class="mono">{side, umetrack: {wrist_t, wrist_q, conf, frames, params, n_params},
-          boxes: {rgb|slam_left|slam_right: {xyxy, vis, frames_seen}}}</span>;
+          boxes: {rgb: {xyxy, vis, frames_seen}}}</span>;
           <span class="mono">masks</span> here is the two hand masks,
           <span class="mono">hand_visible</span> and
           <span class="mono">hand_pose_available</span>.</td>
           <td class="txt"><span class="mono">HOT3D.hands(seq)</span></td>
+        </tr>
+        <tr>
+          <td class="path">data/hands/&lt;SEQ&gt;.slam_boxes.json</td>
+          <td class="txt">CC BY-NC-SA 4.0 — non-commercial</td>
+          <td class="txt"><span class="mono">v, dataset, license, seq, F, note, hands</span>, where
+          <span class="mono">hands.{left,right}</span> maps to
+          <span class="mono">{slam_left|slam_right: {xyxy, vis, frames_seen}}</span> — the hand
+          boxes in the two monochrome cameras. It stays in
+          <span class="path">data/hands/</span> so the licence follows the directory.</td>
+          <td class="txt">No page yet; published for completeness</td>
         </tr>
       </tbody>
     </table>
@@ -283,6 +307,11 @@
     bare filename, not a path, so the sequence payload does not assume where the hand files are
     served from. The hand file has no back-pointer; its <span class="mono">seq</span> field is the
     link.</dd>
+    <dt>slam_boxes_file</dt>
+    <dd>In both the sequence and the hand payload, the name of that file's companion of
+    SLAM-camera boxes — again a bare filename, resolved against
+    <span class="path">data/boxes2d/</span> and <span class="path">data/hands/</span>
+    respectively.</dd>
   </dl>
 
   <p>MANO is the one annotation the release ships that this site does not republish in any file. The
