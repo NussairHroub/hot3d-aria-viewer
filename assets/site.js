@@ -312,6 +312,43 @@ const HOT3D = (() => {
     ctx.restore();
   }
 
+  /** Run `fn` once, when `el` first comes into view — or straight away if it already is, or if
+   *  the browser has no IntersectionObserver. Used to hold a multi-megabyte payload fetch until
+   *  the reader actually scrolls to the panel that needs it. */
+  function whenVisible(el, fn, margin = 600) {
+    if (!el) { fn(); return; }
+    let done = false, queued = false, timer = 0;
+    const stop = () => {
+      removeEventListener('scroll', onMove);
+      removeEventListener('resize', onMove);
+      if (io) io.disconnect();
+      clearInterval(timer);
+    };
+    const check = () => {
+      queued = false;
+      if (done) return;
+      const r = el.getBoundingClientRect();
+      // Within `margin` of the viewport, or already scrolled clean past it. It is a rect check
+      // and not only an IntersectionObserver because a jump — a #hash link, End, a restored
+      // scroll position — never renders a frame with the panel on screen, so the observer, which
+      // reports crossings, stays silent. The poll covers hosts that swallow scroll events.
+      if (r.bottom > -margin ? r.top < innerHeight + margin : true) {
+        done = true;
+        stop();
+        fn();
+      }
+    };
+    const onMove = () => { if (!queued) { queued = true; requestAnimationFrame(check); } };
+    const io = typeof IntersectionObserver === 'function'
+      ? new IntersectionObserver(onMove, { rootMargin: `${margin}px` }) : null;
+    if (io) io.observe(el);
+    addEventListener('scroll', onMove, { passive: true });
+    addEventListener('resize', onMove);
+    timer = setInterval(check, 500);
+    setTimeout(() => clearInterval(timer), 60000);   // give up polling; the listeners remain
+    check();
+  }
+
   function init(footerExtra) {
     restoreTheme();
     if (document.readyState === 'loading') {
@@ -319,7 +356,7 @@ const HOT3D = (() => {
     } else { mountHeader(); mountFooter(footerExtra); }
   }
 
-  return { init, mountHeader, mountFooter, restoreTheme, f32, u8, json, index, sequence, hands,
+  return { init, mountHeader, mountFooter, restoreTheme, f32, u8, json, index, sequence, hands, whenVisible,
            quatToMat3, applyPose, dist, pathLength, fmt, css, channel, linePlot, playhead, PAGES };
 })();
 

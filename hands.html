@@ -22,6 +22,7 @@
   .barrow .lab { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; }
   .barpair { display: grid; gap: 3px; }
   .bar { display: flex; height: 11px; border-radius: 3px; overflow: hidden; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
+  .bar.thin { height: 7px; }
   .bar b { display: block; height: 100%; font-size: 0; }
   .s-both { background: var(--c-hand); }
   .s-l { background: color-mix(in srgb, var(--c-hand) 55%, transparent); }
@@ -61,7 +62,7 @@
     one file: hand data is kept in <span class="mono">data/hands/&lt;SEQ&gt;.hands.json</span> and
     everything below is read from there. Details in
     <a href="DATA_LICENSE.md">DATA_LICENSE.md</a>.</p>
-    <p class="note mono src" id="licStr">Licence line loads with the hand files.</p>
+    <p class="note mono src" id="licStr">Licence line loads with the selected recording’s hand file.</p>
   </div>
 
   <section class="figs" aria-label="Hand annotation at a glance">
@@ -70,7 +71,7 @@
     <div class="fig"><div class="n" id="fManoCov">—</div><div class="k">of those the release also annotates with MANO</div></div>
     <div class="fig"><div class="n" id="fBox">—</div><div class="k">hand boxes in the RGB view</div></div>
   </section>
-  <p class="loading" id="status">Loading the twelve featured recordings…</p>
+  <p class="loading" id="status">Loading the summary of the twelve featured recordings…</p>
 
   <h2>What this file ships for a hand</h2>
   <div class="cards">
@@ -107,10 +108,10 @@
   channels rather than one nested inside the other, and the counts below measure them separately.</p>
   <div class="lg" style="margin-top:12px">
     <span><i style="color:var(--c-hand)"></i>upper bar: wrist pose</span>
-    <span><i style="color:var(--c-hand);opacity:.55"></i>lower bar: hand box in RGB</span>
+    <span><i style="color:var(--c-hand);opacity:.55"></i>lower two bars: hand box in RGB, left then right</span>
     <span><span class="sw s-both"></span>both hands</span>
-    <span><span class="sw s-l"></span>left only</span>
-    <span><span class="sw s-r"></span>right only</span>
+    <span><span class="sw s-l"></span>left hand</span>
+    <span><span class="sw s-r"></span>right hand</span>
     <span><span class="sw" style="background:var(--surface-2)"></span>neither</span>
   </div>
   <div class="bars" id="bars"></div>
@@ -130,13 +131,18 @@
       <tbody id="tbody"><tr><td colspan="8" class="loading">waiting for hand files…</td></tr></tbody>
     </table>
   </div>
-  <p class="note">Posed counts come from
+  <p class="note">Every count in this table and in the bars is read from
+  <span class="mono">data/summary.json</span>, which aggregates the same twelve hand files and
+  sequence payloads: posed counts are
   <span class="mono">hands.&lt;side&gt;.umetrack.frames</span> in
-  <span class="mono">data/hands/&lt;SEQ&gt;.hands.json</span>; box counts from
+  <span class="mono">data/hands/&lt;SEQ&gt;.hands.json</span>, box counts
   <span class="mono">hands.&lt;side&gt;.boxes.rgb.frames_seen</span> in the same file. “Both” is the
   release mask <span class="mono">masks.hand_pose_available.rgb</span>, which on these twelve is 1 on
-  exactly the frames where both hands are posed. Frame counts come from the sequence payload and
-  match <span class="mono">F</span> in the hand file.</p>
+  exactly the frames where both hands are posed, so each hand's remaining posed frames are the ones
+  it carries alone. The box bars are drawn one per hand rather than split both / left only / right
+  only: the summary carries each hand's box count, not the number of frames on which both hands are
+  boxed. Frame counts come from the sequence payload and match <span class="mono">F</span> in the
+  hand file.</p>
 
   <h2>One recording in detail</h2>
   <div class="ctl">
@@ -215,13 +221,25 @@
 <script>
 HOT3D.init();
 
+/* Everything that spans the twelve featured recordings is read from data/summary.json (~44 KB,
+   precomputed from these same payloads by scripts/hot3d_summary.py, with the same NaN handling).
+   The multi-megabyte sequence and hand payloads are fetched one recording at a time, when the
+   per-frame views below need them — never twelve at once. */
 const SEQS = ['P0001_4bf4e21a','P0002_65085bfc','P0003_ebdc6ff7','P0009_e71e2f24',
               'P0010_573b2de6','P0010_8ff3e5c4','P0011_2255f410','P0011_72efb935',
               'P0012_130a66e1','P0014_1fdca00e','P0015_cc5dfd13','P0015_e7458eb3'];
 const SIDES = ['left','right'];
 const $ = (id) => document.getElementById(id);
 const F1 = HOT3D.fmt;
-const S = { recs: [], by: new Map(), sel: null, hand: 'right' };
+const S = {
+  rows: [],            // one per recording, from summary.json
+  by: new Map(),
+  sel: null,           // decoded payload of the selected recording, or null while it loads
+  hand: 'right',
+  detail: new Map(),   // seq -> decoded payload, so re-selecting is instant
+  files: new Map(),    // seq -> the facts only the hand file carries (licence, n_params, MANO flag)
+  token: 0,            // stale-load guard: only the newest selection may draw
+};
 const PARAMS = new Map();   // decoded UmeTrack angle blocks, keyed seq/side
 
 /* ---------- small helpers ---------- */
@@ -234,56 +252,74 @@ function median(a) {
   const h = v.length >> 1;
   return v.length % 2 ? v[h] : (v[h - 1] + v[h]) / 2;
 }
-function finiteMask(rows) {
-  const m = new Uint8Array(rows.length);
-  for (let i = 0; i < rows.length; i++) m[i] = Number.isFinite(rows[i][0]) ? 1 : 0;
-  return m;
-}
-function count(m, v) { let n = 0; for (let i = 0; i < m.length; i++) if (m[i] === v) n++; return n; }
-function pairCounts(a, b) {                 // both / a-only / b-only / neither
-  let both = 0, ao = 0, bo = 0;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] && b[i]) both++; else if (a[i]) ao++; else if (b[i]) bo++;
-  }
-  return { both, ao, bo, none: a.length - both - ao - bo };
-}
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
 const num = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '—');
+/* a bar segment never takes a negative or NaN width */
+const wpct = (n, d) => (Number.isFinite(n) && Number.isFinite(d) && d > 0 ? Math.max(0, 100 * n / d) : 0);
 
-/* ---------- payload + hand file -> the numbers this page needs ---------- */
+/* ---------- summary.json -> the cross-recording numbers ---------- */
+
+/* One row of data/summary.json. Frame counts here are the same ones the hand file reports:
+   hands.<side>.pose_frames is umetrack.frames, box_frames_rgb is boxes.rgb.frames_seen. */
+function fromSummary(r) {
+  const hb = r.hands || {};
+  const hands = {};
+  for (const side of SIDES) {
+    const h = hb[side] || {};
+    hands[side] = {
+      nPose: h.pose_frames, nBox: h.box_frames_rgb, boxNoPose: h.box_without_pose,
+      nMano: h.mano_frames, medConf: h.median_conf,
+    };
+  }
+  /* "Both" is the release mask masks.hand_pose_available.rgb, which on these twelve is 1 on
+     exactly the frames where both hands are posed. The summary stores its pass rate over the
+     annotated frames, so the frame count is rate x annotated; separation.frames — the frames with
+     a wrist on both hands — is the same number, and stands in if the mask block is missing. */
+  const hpa = ((r.masks || {}).hand_pose_available || {}).rgb;
+  const sep = hb.separation || {};
+  const nBoth = hpa && Number.isFinite(hpa.rate) && Number.isFinite(hpa.annotated)
+    ? Math.round(hpa.rate * hpa.annotated)
+    : sep.frames;
+  return { seq: r.seq, participant: r.participant, F: r.F, dur: r.duration_s, fps: r.fps,
+           hands, nBoth };
+}
+
+/* ---------- one recording's payload -> its per-frame series ---------- */
 
 /* p is data/seq/<SEQ>.json (timeline, headset, fps); hf is data/hands/<SEQ>.hands.json
-   (every hand field). The release licenses the two differently, so they are separate files. */
-function prep(p, hf) {
+   (every hand field). The release licenses the two differently, so they are separate files.
+   Both are fetched only for the recording the reader has selected. */
+function prep(row, p, hf) {
   if (hf.F !== p.F) throw new Error(`${p.seq}: hand file has ${hf.F} frames, payload has ${p.F}`);
-  const rec = { seq: p.seq, participant: p.participant, F: p.F, dur: p.duration_s,
-                t: HOT3D.f32(p.t), hands: {}, payload: p, hf,
-                license: hf.license, manoIncluded: hf.summary.mano_included };
+  if (row && row.F !== p.F) throw new Error(`${p.seq}: summary has ${row.F} frames, payload has ${p.F}`);
+  const rec = { seq: p.seq, participant: p.participant, F: p.F, dur: p.duration_s, fps: p.fps,
+                t: HOT3D.f32(p.t), hands: {}, hf, nBoth: row ? row.nBoth : NaN };
   rec.headZ = new Float32Array(rec.F);
   const H = HOT3D.f32(p.headset.T, 3);
   for (let i = 0; i < rec.F; i++) rec.headZ[i] = H[i][2];
-  for (const side of SIDES) {
-    const h = hf.hands[side];
-    const u = HOT3D.f32(h.umetrack.wrist_t, 3);
-    const box = HOT3D.f32(h.boxes.rgb.xyxy, 4);
-    const confU = HOT3D.f32(h.umetrack.conf);
-    rec.hands[side] = {
-      u,
-      posed: finiteMask(u), boxed: finiteMask(box),
-      nPose: h.umetrack.frames,
-      nBox: h.boxes.rgb.frames_seen,
-      nParamsU: h.umetrack.n_params,
-      nMano: hf.summary.mano_frames[side],
-      confUFinite: count2(confU),
-      confUMin: Math.min.apply(null, Array.from(confU).filter(Number.isFinite)),
-      confUMax: Math.max.apply(null, Array.from(confU).filter(Number.isFinite)),
-    };
-  }
-  rec.bothMask = HOT3D.u8(hf.masks.hand_pose_available.rgb);
-  rec.nBoth = count(rec.bothMask, 1);
+  for (const side of SIDES) rec.hands[side] = { u: HOT3D.f32(hf.hands[side].umetrack.wrist_t, 3) };
   return rec;
 }
-function count2(arr) { let n = 0; for (let i = 0; i < arr.length; i++) if (Number.isFinite(arr[i])) n++; return n; }
+
+/* the three facts the summary does not carry, read off each hand file as it loads */
+function noteFile(hf) {
+  const nParams = [];
+  for (const side of SIDES) {
+    const n = hf.hands[side] && hf.hands[side].umetrack && hf.hands[side].umetrack.n_params;
+    if (Number.isFinite(n)) nParams.push(n);
+  }
+  S.files.set(hf.seq, { license: hf.license, manoIncluded: hf.summary.mano_included, nParams });
+}
+function fileFacts() {
+  const lics = new Set(), np = new Set();
+  let anyMano = false;
+  for (const f of S.files.values()) {
+    if (f.license) lics.add(f.license);
+    for (const n of f.nParams) np.add(n);
+    if (f.manoIncluded) anyMano = true;
+  }
+  return { n: S.files.size, lics: [...lics], nParams: [...np].sort((a, b) => a - b), anyMano };
+}
 
 /* derived per-frame series, computed when a recording is selected */
 function heightSeries(rec, side) {
@@ -307,6 +343,19 @@ function sepSeries(rec) {
 }
 
 /* ---------- drawing ---------- */
+
+function clearCanvas(cv) {
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  cv.width = (cv.clientWidth || 600) * dpr;
+  cv.height = (cv.clientHeight || 160) * dpr;
+  cv.getContext('2d').clearRect(0, 0, cv.width, cv.height);
+}
+/* the detail panel's own loading / error state: the tables above stay as they are */
+function detailNote(msg, bad) {
+  const body = bad ? `<span style="color:var(--bad)">${esc(msg)}</span>` : esc(msg);
+  for (const id of ['capHeight', 'capSpeed', 'capSep', 'capStrip']) $(id).innerHTML = body;
+  for (const id of ['cHeight', 'cSpeed', 'cSep', 'cStrip']) clearCanvas($(id));
+}
 
 function drawCharts() {
   const rec = S.sel;
@@ -333,7 +382,7 @@ function drawCharts() {
     { v: sr, color: hand, dash: [5, 4], width: 1.4 },
   ], { fmt: (v) => v.toFixed(2), ...zeroTo(maxFinite(sl), maxFinite(sr)) });
   $('capSpeed').innerHTML = `Wrist speed, metres per second, from the frame-to-frame difference of
-    the UmeTrack wrist position at ${rec.payload.fps.toFixed(0)} fps, ${esc(rec.seq)}. Median left
+    the UmeTrack wrist position at ${rec.fps.toFixed(0)} fps, ${esc(rec.seq)}. Median left
     ${num(median(sl))} m/s, right ${num(median(sr))} m/s; peak ${num(maxFinite(sl))} and
     ${num(maxFinite(sr))} m/s. The first frame after a gap has no speed, because the previous
     position is missing.`;
@@ -357,12 +406,6 @@ function zeroTo(...tops) {
 function listJoin(a) {
   if (a.length <= 1) return a.join('');
   return `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`;
-}
-function boxNoPose(rec, side) {
-  const p = rec.hands[side].posed, b = rec.hands[side].boxed;
-  let n = 0;
-  for (let i = 0; i < p.length; i++) if (b[i] && !p[i]) n++;
-  return n;
 }
 
 function drawStrip() {
@@ -487,22 +530,26 @@ function drawAll() { try { drawCharts(); drawStrip(); } catch (e) { $('status').
 function renderAvailability() {
   const bars = $('bars'), rows = [];
   bars.innerHTML = '';
-  for (const rec of S.recs) {
-    const pose = pairCounts(rec.hands.left.posed, rec.hands.right.posed);
-    const box = pairCounts(rec.hands.left.boxed, rec.hands.right.boxed);
-    const seg = (c) => `<b class="s-both" style="width:${100 * c.both / rec.F}%"></b>` +
-                       `<b class="s-l" style="width:${100 * c.ao / rec.F}%"></b>` +
-                       `<b class="s-r" style="width:${100 * c.bo / rec.F}%"></b>`;
+  for (const rec of S.rows) {
+    const L = rec.hands.left, R = rec.hands.right;
+    /* the pose bar: both hands, then the frames only one hand carries. Every frame with both
+       wrists is inside each hand's own count, so the one-hand shares are the remainders. */
+    const both = rec.nBoth, ao = L.nPose - both, bo = R.nPose - both;
+    const seg = `<b class="s-both" style="width:${wpct(both, rec.F)}%"></b>` +
+                `<b class="s-l" style="width:${wpct(ao, rec.F)}%"></b>` +
+                `<b class="s-r" style="width:${wpct(bo, rec.F)}%"></b>`;
+    /* the box bars are per hand: the summary carries each hand's RGB box count, not the count of
+       frames where both hands are boxed, and the two channels overlap in an unrecorded way. */
     const el = document.createElement('div');
     el.className = 'barrow';
     el.innerHTML = `<div class="lab" title="${esc(rec.seq)}">${esc(F1.seq(rec.seq))}</div>
       <div class="barpair">
-        <div class="bar" title="wrist pose: both ${F1.pct(pose.both / rec.F, 0)}, left only ${F1.pct(pose.ao / rec.F, 0)}, right only ${F1.pct(pose.bo / rec.F, 0)}">${seg(pose)}</div>
-        <div class="bar" style="opacity:.55" title="hand box in RGB: both ${F1.pct(box.both / rec.F, 0)}, left only ${F1.pct(box.ao / rec.F, 0)}, right only ${F1.pct(box.bo / rec.F, 0)}">${seg(box)}</div>
+        <div class="bar" title="wrist pose: both ${F1.pct(both / rec.F, 0)}, left only ${F1.pct(ao / rec.F, 0)}, right only ${F1.pct(bo / rec.F, 0)}">${seg}</div>
+        <div class="bar thin" style="opacity:.55" title="left hand box in RGB: ${F1.pct(L.nBox / rec.F, 0)}"><b class="s-l" style="width:${wpct(L.nBox, rec.F)}%"></b></div>
+        <div class="bar thin" style="opacity:.55" title="right hand box in RGB: ${F1.pct(R.nBox / rec.F, 0)}"><b class="s-r" style="width:${wpct(R.nBox, rec.F)}%"></b></div>
       </div>`;
     bars.append(el);
 
-    const L = rec.hands.left, R = rec.hands.right;
     rows.push(`<tr>
       <td class="mono">${esc(F1.seq(rec.seq))}</td>
       <td class="mono">${esc(rec.participant)}</td>
@@ -517,12 +564,12 @@ function renderAvailability() {
   $('tbody').innerHTML = rows.join('');
 }
 
-function renderSummary(ix) {
+function renderSummary() {
   const all = [];
-  for (const rec of S.recs) for (const side of SIDES) {
+  for (const rec of S.rows) for (const side of SIDES) {
     all.push({ seq: rec.seq, side, pose: rec.hands[side].nPose / rec.F, box: rec.hands[side].nBox / rec.F,
                n: rec.hands[side].nPose, nBox: rec.hands[side].nBox, nMano: rec.hands[side].nMano,
-               full: rec.hands[side].nPose === rec.F });
+               conf: rec.hands[side].medConf, full: rec.hands[side].nPose === rec.F });
   }
   const pick = (side, key) => all.filter(r => r.side === side).map(r => r[key]);
   $('fMedL').textContent = F1.pct(median(pick('left', 'pose')), 1);
@@ -545,17 +592,17 @@ function renderSummary(ix) {
   /* pose and box are separate channels: neither count contains the other */
   let bnpFrames = 0, bnpHands = 0, worstBnp = null;
   const boxOverPose = [];
-  for (const rec of S.recs) for (const side of SIDES) {
-    const k = boxNoPose(rec, side);
-    if (k) { bnpHands++; bnpFrames += k; if (!worstBnp || k > worstBnp.k) worstBnp = { seq: rec.seq, side, k }; }
+  for (const rec of S.rows) for (const side of SIDES) {
     const h = rec.hands[side];
+    const k = h.boxNoPose;
+    if (k) { bnpHands++; bnpFrames += k; if (!worstBnp || k > worstBnp.k) worstBnp = { seq: rec.seq, side, k }; }
     if (h.nBox > h.nPose) boxOverPose.push({ seq: rec.seq, side, box: h.nBox, pose: h.nPose });
   }
   const bigger = boxOverPose.length
     ? `and on ${boxOverPose.length === 1 ? 'one hand' : `${boxOverPose.length} hands`} the box is
        seen on more frames than the pose — ${boxOverPose.map(r => `${esc(F1.seq(r.seq))} ${r.side},
        ${F1.n(r.box)} box frames against ${F1.n(r.pose)} posed`).join('; ')}. Neither count bounds
-       the other, so read the two bars below independently`
+       the other, so read the bars below independently`
     : 'though on these twelve the box count stays at or below the posed count for every hand';
   $('availProse').innerHTML = `A hand is annotated on a frame when the released trajectory has an
     entry for it; everywhere else the file stores NaN. Separately, the release gives a 2D box per
@@ -572,34 +619,28 @@ function renderSummary(ix) {
   $('fBox').textContent = F1.n(totalBox);
   $('fManoCov').textContent = totalPosed ? F1.pct(totalMano / totalPosed, 1) : '—';
 
-  const setU = new Set();
-  for (const rec of S.recs) for (const side of SIDES) setU.add(rec.hands[side].nParamsU);
-  const nParU = [...setU].sort((a, b) => a - b).join(' / ');
-  $('fUme').textContent = nParU;
-  $('nU').textContent = nParU;
-  $('nU2').textContent = nParU;
+  const sameFrames = all.every(r => r.nMano === r.n);
+  /* The summary keeps each hand's median UmeTrack confidence; the per-frame conf vector, and so
+     the count of frames carrying one, stays in the hand file. */
+  const confs = all.map(r => r.conf).filter(Number.isFinite);
+  const cMin = confs.length ? Math.min(...confs) : NaN;
+  const cMax = confs.length ? Math.max(...confs) : NaN;
+  const confTxt = !confs.length ? 'not in the summary'
+    : cMax - cMin < 5e-3 ? `median ${cMin.toFixed(2)} on ${confs.length === all.length ? `every one of the ${all.length} hands` : `${confs.length} of the ${all.length} hands`}`
+    : `median ${cMin.toFixed(2)}–${cMax.toFixed(2)} across the ${confs.length} hands`;
 
-  let uconf = 0, uframes = 0, sameFrames = true, anyMano = false;
-  let cMin = Infinity, cMax = -Infinity;
-  for (const rec of S.recs) {
-    if (rec.manoIncluded) anyMano = true;
-    for (const side of SIDES) {
-      const h = rec.hands[side];
-      uconf += h.confUFinite; uframes += h.nPose;
-      if (h.nMano !== h.nPose) sameFrames = false;
-      if (Number.isFinite(h.confUMin)) { cMin = Math.min(cMin, h.confUMin); cMax = Math.max(cMax, h.confUMax); }
-    }
-  }
-  const confRange = Number.isFinite(cMin)
-    ? (cMax - cMin < 5e-3 ? `constant ${cMin.toFixed(2)}` : `${cMin.toFixed(2)}–${cMax.toFixed(2)}`)
-    : 'no finite value';
-  $('kvU').innerHTML = `<dt>posed frames</dt><dd>${F1.n(uframes)} across the twelve</dd>
-    <dt>conf</dt><dd>present on ${F1.n(uconf)} of them, value ${confRange}</dd>
-    <dt>params</dt><dd>${nParU} angles per frame, radians</dd>`;
+  const f = fileFacts();
+  const nParU = f.nParams.join(' / ');
+  if (nParU) { $('fUme').textContent = nParU; $('nU').textContent = nParU; $('nU2').textContent = nParU; }
+
+  $('kvU').innerHTML = `<dt>posed frames</dt><dd>${F1.n(totalPosed)} across the twelve</dd>
+    <dt>conf</dt><dd>${confTxt}</dd>
+    <dt>params</dt><dd>${nParU ? `${nParU} angles per frame, radians`
+      : 'angles per frame, radians — the count loads with the selected recording'}</dd>`;
   $('kvM').innerHTML = `<dt>annotated frames</dt><dd>${F1.n(totalMano)} — ${sameFrames
       ? 'the same frames as UmeTrack, hand for hand' : 'a different count from UmeTrack on at least one hand'}</dd>
     <dt>params</dt><dd>not in this file</dd>
-    <dt>mano_included</dt><dd>${anyMano ? 'true in at least one file' : 'false in all twelve'}</dd>`;
+    <dt>mano_included</dt><dd>${manoFlagText(f)}</dd>`;
 
   $('manoProse').innerHTML = `HOT3D fits two hand parameterisations to the same motion-capture ground
     truth. UmeTrack is the one shown on this page. MANO is the other: the widely used parametric hand
@@ -610,9 +651,22 @@ function renderSummary(ix) {
       ? 'exactly the frames UmeTrack covers, hand for hand, so nothing is annotated by one model and not the other'
       : 'which does not match the UmeTrack count on every hand'}. The parameters themselves are
     withheld here because their use is gated by the SMPL-X/MANO licence, which this site is not able
-    to pass on; <span class="mono">summary.mano_included</span> is
-    ${anyMano ? 'not false everywhere' : 'false in all twelve files'}.`;
+    to pass on; <span class="mono">summary.mano_included</span> is ${manoFlagText(f)}.`;
 
+  $('licStr').textContent = f.lics.length === 1
+    ? f.lics[0]
+    : (f.lics.length ? `${f.lics.length} different licence lines across the hand files read — see DATA_LICENSE.md.`
+                     : 'Licence line loads with the selected recording’s hand file.');
+}
+/* mano_included and the licence line live in the hand files, not in the summary, so the claim is
+   only as wide as the files this page has actually read. */
+function manoFlagText(f) {
+  if (!f.n) return 'read with the selected recording’s hand file';
+  if (f.anyMano) return `true in at least one of the ${f.n === 1 ? 'file' : `${f.n} files`} read here`;
+  return f.n === 1 ? 'false in the hand file read here' : `false in all ${f.n} hand files read here`;
+}
+
+function renderIndexProse(ix) {
   if (ix) {
     const aria = ix.sequences.filter(r => r.device === 'Aria');
     const ume = aria.filter(r => r.has && r.has.umetrack).length;
@@ -630,24 +684,42 @@ function renderSummary(ix) {
   } else {
     $('idxProse').innerHTML = `<span class="mono">data/index.json</span> did not load, so the
       release-wide hand-file counts are not shown. Every other figure on this page comes from the
-      twelve hand files listed above.`;
+      twelve recordings summarised above.`;
   }
-
-  const lics = new Set(S.recs.map(r => r.license).filter(Boolean));
-  $('licStr').textContent = lics.size === 1
-    ? [...lics][0]
-    : (lics.size ? `${lics.size} different licence lines across the twelve hand files — see DATA_LICENSE.md.`
-                 : 'The hand files carry no licence line.');
 }
 
 /* ---------- wiring ---------- */
 
-function selectRec(seq) {
-  S.sel = S.by.get(seq);
-  const rec = S.sel;
-  $('selMeta').textContent = `${rec.participant} · ${F1.n(rec.F)} frames · ${F1.clock(rec.dur)} · ` +
-    `left posed ${F1.pct(rec.hands.left.nPose / rec.F, 1)}, right ${F1.pct(rec.hands.right.nPose / rec.F, 1)}`;
-  drawAll();
+/* The tables above are already drawn from the summary; only this panel needs the recording's own
+   payload, so it is fetched here, once per recording, and kept for a second visit. A fetch that
+   finishes after the reader has moved on is dropped rather than drawn. */
+async function selectRec(seq) {
+  const row = S.by.get(seq);
+  if (!row) return;
+  const token = ++S.token;
+  $('selMeta').textContent = `${row.participant} · ${F1.n(row.F)} frames · ${F1.clock(row.dur)} · ` +
+    `left posed ${F1.pct(row.hands.left.nPose / row.F, 1)}, right ${F1.pct(row.hands.right.nPose / row.F, 1)}`;
+
+  const have = S.detail.get(seq);
+  if (have) { S.sel = have; drawAll(); return; }
+
+  S.sel = null;
+  detailNote(`Loading ${seq} — its sequence payload and hand file, a few megabytes…`);
+  try {
+    const [p, hf] = await Promise.all([HOT3D.sequence(seq), HOT3D.hands(seq)]);
+    if (token !== S.token) return;                 // a newer selection owns the panel now
+    const rec = prep(row, p, hf);
+    S.detail.set(seq, rec);
+    noteFile(hf);
+    renderSummary();                               // licence line, n_params and the MANO flag
+    S.sel = rec;
+    drawAll();
+  } catch (e) {
+    if (token !== S.token) return;
+    S.sel = null;
+    detailNote(`Could not load ${seq}: ${e.message}. The figures above are unaffected — they come `
+      + 'from data/summary.json.', true);
+  }
 }
 
 function setHand(side) {
@@ -669,30 +741,35 @@ if (matchMedia('(prefers-color-scheme: dark)').addEventListener) {
 
 (async () => {
   const status = $('status');
-  let done = 0;
-  const tick = () => { status.textContent = `Loading the twelve featured recordings… ${++done}/${SEQS.length}`; };
+  /* index.json carries the release-wide counts, not the featured twelve: it is small, and the
+     page is drawn without waiting for it. */
+  const ixP = HOT3D.index().catch(() => null);
   try {
-    const [ix, ...pairs] = await Promise.all([
-      HOT3D.index().catch(() => null),
-      ...SEQS.map(s => Promise.all([HOT3D.sequence(s), HOT3D.hands(s)]).then(r => { tick(); return r; })),
-    ]);
-    S.recs = pairs.map(([p, hf]) => prep(p, hf));
-    for (const rec of S.recs) S.by.set(rec.seq, rec);
-    $('seqSel').innerHTML = S.recs
+    const sum = await HOT3D.json('data/summary.json');
+    const rows = new Map((sum.recordings || []).map(r => [r.seq, r]));
+    S.rows = SEQS.map(s => rows.get(s)).filter(Boolean).map(fromSummary);
+    if (!S.rows.length) throw new Error('none of the twelve featured recordings are in it');
+    for (const rec of S.rows) S.by.set(rec.seq, rec);
+    $('seqSel').innerHTML = S.rows
       .map(r => `<option value="${esc(r.seq)}">${esc(r.seq)} · ${esc(r.participant)}</option>`).join('');
     renderAvailability();
-    renderSummary(ix);
-    const start = S.by.has('P0003_ebdc6ff7') ? 'P0003_ebdc6ff7' : S.recs[0].seq;
+    renderSummary();
+    status.textContent = `Read data/summary.json: ${S.rows.length} recordings, ` +
+      `${F1.n(S.rows.reduce((s, r) => s + r.F, 0))} frames, ` +
+      `${F1.clock(S.rows.reduce((s, r) => s + r.dur, 0))} of recording. ` +
+      `The full payload of one recording loads when it is selected below.`;
+    const start = S.by.has('P0003_ebdc6ff7') ? 'P0003_ebdc6ff7' : S.rows[0].seq;
     $('seqSel').value = start;
-    selectRec(start);
-    status.textContent = `Read ${SEQS.length} payloads and ${SEQS.length} hand files: ` +
-      `${F1.n(S.recs.reduce((s, r) => s + r.F, 0))} frames, ` +
-      `${F1.clock(S.recs.reduce((s, r) => s + r.dur, 0))} of recording.`;
+    // The table above is the whole cross-recording story and needs nothing else. One recording's
+    // payload pair is several MB, so it waits until the reader is near the panel that uses it.
+    HOT3D.whenVisible($('seqSel').closest('section') || $('seqSel'), () => selectRec(start));
   } catch (e) {
-    status.innerHTML = `<span style="color:var(--bad)">Could not load the hand files: ${esc(e.message)}.</span>
+    status.innerHTML = `<span style="color:var(--bad)">Could not load data/summary.json: ${esc(e.message)}.</span>
       The figures below stay empty; the prose describes the release, not this page's numbers.`;
     $('tbody').innerHTML = `<tr><td colspan="8">No data — ${esc(e.message)}</td></tr>`;
+    detailNote('No recording summary, so no recording can be selected.', true);
   }
+  renderIndexProse(await ixP);
 })();
 </script>
 </body>

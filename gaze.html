@@ -36,25 +36,26 @@
     <h1>Where the wearer looked, as four numbers per frame</h1>
     <p class="lede">Aria's machine-perception service estimates gaze from the two eye cameras and
     ships it as a yaw per eye, one shared pitch, and a gaze depth — all in the Central Pupil Frame,
-    a frame fixed between the eyes. This page reads that block out of the twelve featured
-    payloads: the traces, how the two eyes converge, and what the whole distribution looks like.</p>
+    a frame fixed between the eyes. What spans the twelve featured recordings is read from the
+    pre-computed <code>data/summary.json</code>; the traces, the scatter and the distributions need
+    the per-frame arrays, so they read one payload — the recording selected below.</p>
   </div>
 
   <section class="figs" aria-label="Gaze across the twelve featured recordings">
     <div class="fig"><div class="n" id="fRecs">—</div><div class="k">recordings read</div></div>
     <div class="fig"><div class="n" id="fCov">—</div><div class="k">frames with gaze</div></div>
-    <div class="fig"><div class="n" id="fRate">—</div><div class="k">gaze update rate</div></div>
+    <div class="fig"><div class="n" id="fRate">—</div><div class="k">gaze update rate · selected</div></div>
     <div class="fig"><div class="n" id="fDepth">—</div><div class="k">median gaze depth</div></div>
     <div class="fig"><div class="n" id="fPitch">—</div><div class="k">median pitch</div></div>
     <div class="fig"><div class="n" id="fVerg">—</div><div class="k">median convergence</div></div>
   </section>
-  <p class="loading" id="loadLine">reading the gaze block of 12 payloads…</p>
+  <p class="loading" id="loadLine">reading data/summary.json…</p>
 
   <h2>What the signal is</h2>
   <p>Each payload carries one <code>gaze</code> block: <code>source</code>, and four per-frame
   arrays of length <em>F</em> that line up one-to-one with the RGB video. Yaw and pitch are radians,
-  depth is metres. The ranges below are the 1st and 99th percentile over every finite frame of the
-  <span id="fieldScope">recordings read so far</span>, printed in degrees for the angles.</p>
+  depth is metres. The ranges below are the 1st and 99th percentile over every finite frame of
+  <span id="fieldScope">the selected recording</span>, printed in degrees for the angles.</p>
   <div class="table-wrap">
     <table id="fieldTab">
       <thead><tr>
@@ -88,6 +89,10 @@
       <tbody id="seqBody"></tbody>
     </table>
   </div>
+  <p class="note" id="rateNote">Every column here comes from <code>data/summary.json</code> except
+  <em>Rate</em>, which counts how often the value actually changes and so needs the per-frame array:
+  it fills in for a recording once that recording's payload has been fetched, which happens when it
+  is selected below.</p>
 
   <h2>One recording, over time</h2>
   <div class="row" style="margin-bottom:14px">
@@ -140,8 +145,8 @@
     </div>
   </div>
 
-  <h2>Distributions across the twelve recordings</h2>
-  <p id="distIntro" class="loading">waiting for all 12 payloads…</p>
+  <h2>Distributions within one recording</h2>
+  <p id="distIntro" class="loading">waiting for the selected recording…</p>
   <div class="grid-2">
     <figure>
       <canvas class="chart tall" id="cDens"></canvas>
@@ -181,15 +186,17 @@
 HOT3D.init();
 
 /* Featured recordings: the twelve that ship a payload (see the build's data/seq directory).
-   The page reads only the gaze block from each, so it fetches with plain fetch() and keeps the
-   few arrays it needs — caching twelve whole payloads through HOT3D.sequence() would hold tens
-   of megabytes of parsed JSON for no gain. */
+   Everything that spans recordings — the calibration table, the coverage, the per-recording
+   medians — comes from data/summary.json (44 KB), which scripts/hot3d_summary.py computed from
+   these same payloads. A payload (~4 MB) is fetched only for the recording that is selected, and
+   only because the traces, the scatter and the two distribution panels need the per-frame arrays;
+   reading all twelve to draw them meant ~48 MB before a single figure appeared. */
 const FEATURED = [
   'P0001_4bf4e21a', 'P0002_65085bfc', 'P0003_ebdc6ff7', 'P0009_e71e2f24',
   'P0010_573b2de6', 'P0010_8ff3e5c4', 'P0011_2255f410', 'P0011_72efb935',
   'P0012_130a66e1', 'P0014_1fdca00e', 'P0015_cc5dfd13', 'P0015_e7458eb3',
 ];
-const FIRST = 'P0009_e71e2f24';          // read first: the widest depth range and the most gaps
+const FIRST = 'P0009_e71e2f24';          // selected first: the widest depth range and the most gaps
 const DEG = 180 / Math.PI;
 const F = HOT3D.fmt;
 const $ = (id) => document.getElementById(id);
@@ -253,13 +260,20 @@ const countNaN = (a) => { let n = 0; for (let i = 0; i < a.length; i++) if (!isF
 
 /* ---------- loading ---------- */
 
-const recs = new Map();                   // seq -> gaze block, decoded
+const recs = new Map();                   // seq -> gaze block of a fetched payload, decoded
+const rows = new Map();                   // seq -> summary.json row (no per-frame arrays)
+let corpus = null;                        // the twelve recordings, aggregated from summary.json
+/* what the per-recording half of the page is showing right now: 'loading' until that one payload
+   has arrived, so a chart with nothing to draw can say which of the two reasons it is */
+let view = { seq: null, state: 'idle' };
 
 async function loadGaze(seq) {
-  const r = await fetch(`data/seq/${seq}.json`);
-  if (!r.ok) throw new Error(`data/seq/${seq}.json: HTTP ${r.status}`);
-  const d = await r.json();
+  /* HOT3D.sequence() rather than a bare fetch(): it caches the payload, so going back to a
+     recording costs nothing, and it reports the download to the shared progress bar. Only the
+     recordings a reader actually opens are ever held. */
+  const d = await HOT3D.sequence(seq);
   const g = d.gaze;
+  if (!g) throw new Error(`${seq}: the payload carries no gaze block`);
   const rec = {
     seq, participant: d.participant, F: d.F, duration: d.duration_s, fps: d.fps,
     source: g.source,
@@ -290,7 +304,75 @@ async function loadGaze(seq) {
   // degrees for plotting, computed once so redraws stay cheap
   rec.d = { yl: toDeg(rec.yl), yr: toDeg(rec.yr), pi: toDeg(rec.pi), conv: toDeg(rec.verg) };
   for (let i = 0; i < rec.F; i++) rec.d.conv[i] = -rec.d.conv[i];   // positive convergence angle
+  rec.stats = frameStats(rec);
   return rec;
+}
+
+/** Per-frame pools for this one recording: the two distribution panels, the scatter's implied
+ *  baseline and the vergence card all read them. They were pooled over all twelve recordings when
+ *  the page fetched all twelve; summary.json carries per-recording aggregates, not frames, so the
+ *  pooled version is not reconstructable and these are scoped to the selected recording. */
+function frameStats(r) {
+  const yaw = [], pitch = [], depth = [], vergAbs = [];
+  let finite = 0, negVerg = 0, clipped = 0;
+  const bl = [], invZ = [], vg = [];
+  /* The far end of the released depth is a clamp: many frames share one maximum value. Read that
+     value off this recording rather than assuming it, and keep those frames out of the baseline
+     fit — with one recording in hand its own maximum is the only clamp that can be seen. */
+  const zMax = r.s.dp.length ? r.s.dp[r.s.dp.length - 1] : NaN;
+  const clampAt = isFinite(zMax) ? zMax - 1e-3 : Infinity;
+  const ym = meanArr(r.yl, r.yr);
+  for (let i = 0; i < r.F; i++) {
+    const v = r.verg[i], z = r.dp[i], p = r.pi[i];
+    if (!isFinite(v) || !isFinite(z) || !isFinite(p)) continue;
+    finite++;
+    if (v < 0) negVerg++;
+    yaw.push(ym[i] * DEG); pitch.push(p * DEG); depth.push(z); vergAbs.push(Math.abs(v) * DEG);
+    if (z >= clampAt) { clipped++; continue; }         // the far clamp would bias the baseline
+    bl.push(2 * z * Math.tan(Math.abs(v) / 2));
+    invZ.push(1 / z); vg.push(Math.abs(v));
+  }
+  // Pearson correlation between 1/depth and the convergence angle
+  let corr = NaN;
+  const n = invZ.length;
+  if (n > 2) {
+    let mx = 0, my = 0;
+    for (let i = 0; i < n; i++) { mx += invZ[i]; my += vg[i]; }
+    mx /= n; my /= n;
+    let sxy = 0, sxx = 0, syy = 0;
+    for (let i = 0; i < n; i++) {
+      const a = invZ[i] - mx, b = vg[i] - my;
+      sxy += a * b; sxx += a * a; syy += b * b;
+    }
+    corr = sxy / Math.sqrt(sxx * syy);
+  }
+  const asc = (a) => a.slice().sort((x, y) => x - y);      // sorted once; redraws reuse these
+  return { yaw, pitch, depth, vergAbs, finite, negVerg, clipped, zMax,
+           baseline: median(sorted(bl)), corr,
+           yawS: asc(yaw), pitchS: asc(pitch), depthS: asc(depth), vergS: asc(vergAbs) };
+}
+
+/** The twelve recordings as one set, from summary.json alone: totals are exact sums, and a
+ *  "median" here is the median of the twelve recordings' own medians — not the median over their
+ *  pooled frames, which would need every payload. */
+function buildCorpus(list) {
+  let frames = 0, withGaze = 0, duration = 0;
+  const depth = [], pitch = [], verg = [], parts = new Set(), srcs = new Map();
+  for (const row of list) {
+    const g = row.gaze || {};
+    frames += row.F || 0;
+    duration += row.duration_s || 0;
+    withGaze += g.frames_with_gaze || 0;
+    parts.add(row.participant);
+    if (g.source) srcs.set(g.source, (srcs.get(g.source) || 0) + 1);
+    if (isFinite(g.median_depth_m)) depth.push(g.median_depth_m);
+    if (isFinite(g.median_pitch)) pitch.push(g.median_pitch * DEG);
+    if (isFinite(g.median_vergence)) verg.push(Math.abs(g.median_vergence) * DEG);
+  }
+  return { n: list.length, frames, withGaze, missing: frames - withGaze, duration,
+           participants: parts.size, srcs,
+           medDepth: median(sorted(depth)), medPitch: median(sorted(pitch)),
+           medVerg: median(sorted(verg)) };
 }
 
 /* ---------- the per-recording table ---------- */
@@ -301,21 +383,34 @@ function td(text, cls) {
   e.textContent = text;
   return e;
 }
-function addRow(rec) {
+const rateCells = new Map();              // seq -> the Rate cell, filled when that payload arrives
+
+function addRow(row) {
+  const g = row.gaze || {};
   const tr = document.createElement('tr');
-  /* each median is guarded on its own field: one array being empty must not blank the others */
-  const med = (key, f) => td(rec.s[key].length ? f(median(rec.s[key])) : '—', 'num');
+  /* each median is guarded on its own field: one missing figure must not blank the others */
+  const med = (v, f) => td(isFinite(v) ? f(v) : '—', 'num');
+  const miss = row.F - (isFinite(g.frames_with_gaze) ? g.frames_with_gaze : row.F);
+  /* The update rate is a property of the per-frame array (how often the value changes), so it is
+     not in the summary. The cell waits for this recording's payload rather than being dropped. */
+  const rate = td('—', 'num');
+  rateCells.set(row.seq, rate);
   tr.append(
-    td(F.seq(rec.seq), 'mono'),
-    td(rec.participant, 'mono'),
-    td(rec.source, 'mono'),
-    td(F.n(rec.F), 'num'),
-    td(rec.miss ? `${rec.miss} (${(100 * rec.miss / rec.F).toFixed(2)}%)` : '0', 'num'),
-    td(rec.runs ? `${rec.rate.toFixed(1)} Hz` : '—', 'num'),
-    med('yl', F.deg), med('yr', F.deg), med('pi', F.deg), med('dp', F.m),
+    td(F.seq(row.seq), 'mono'),
+    td(row.participant, 'mono'),
+    td(g.source || '—', 'mono'),
+    td(F.n(row.F), 'num'),
+    td(miss ? `${F.n(miss)} (${(100 * miss / row.F).toFixed(2)}%)` : '0', 'num'),
+    rate,
+    med(g.median_yaw_l, F.deg), med(g.median_yaw_r, F.deg),
+    med(g.median_pitch, F.deg), med(g.median_depth_m, F.m),
   );
-  rec.tr = tr;
   $('seqBody').append(tr);
+}
+
+function fillRate(rec) {
+  const cell = rateCells.get(rec.seq);
+  if (cell) cell.textContent = rec.runs ? `${rec.rate.toFixed(1)} Hz` : '—';
 }
 
 /* ---------- charts ---------- */
@@ -338,11 +433,22 @@ function blank(canvas, msg) {
   ctx.fillText(msg, 8, h / 2);
 }
 
+/** What a chart with nothing to draw should say: the one payload it needs is still coming, or it
+ *  failed, or it arrived and the field really is empty. Returns null in the last case. */
+function waitMsg() {
+  if (view.state === 'loading') return `loading ${F.seq(view.seq)} …`;
+  if (view.state === 'error') return 'this recording could not be read';
+  return null;
+}
+
 function timeChart(canvasId, build) {
   const canvas = $(canvasId);
   const c = { canvas, geom: null, t: null, draw() {
     const spec = build();
-    if (!spec) { blank(canvas, 'signal missing on every frame of this recording'); c.geom = null; return; }
+    if (!spec) {
+      blank(canvas, waitMsg() || 'signal missing on every frame of this recording');
+      c.geom = null; return;
+    }
     c.t = spec.t;
     c.geom = HOT3D.linePlot(canvas, spec.t, spec.series, spec.opts || {});
     if (cursorIdx !== null && cursorIdx < spec.t.length) HOT3D.playhead(canvas, c.geom, spec.t, cursorIdx);
@@ -465,8 +571,6 @@ function describeSelected() {
 
 /* ---------- vergence vs depth scatter ---------- */
 
-let baseline = NaN, vergCorr = NaN;       // computed across all twelve once they are read
-
 plainChart('cScatter', (canvas) => {
   const r = current();
   const dpr = Math.min(devicePixelRatio || 1, 2);
@@ -479,12 +583,13 @@ plainChart('cScatter', (canvas) => {
     ctx.fillStyle = HOT3D.css('--muted');
     ctx.font = `12px ${HOT3D.css('--sans')}`;
     ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-    ctx.fillText('no frame in this recording has both a depth and two yaws', 10, h / 2);
+    ctx.fillText(waitMsg() || 'no frame in this recording has both a depth and two yaws', 10, h / 2);
     $('capScatter').textContent = r
       ? `${r.seq} carries no frame with both a gaze depth and a yaw per eye, so there is nothing to plot against each other.`
-      : 'Waiting for a recording.';
+      : (waitMsg() || 'Waiting for a recording.');
     return;
   }
+  const baseline = r.stats.baseline;
   const padL = 46, padR = 10, padT = 10, padB = 26;
   const xMax = Math.max(-quant(r.s.verg, .002) * DEG, 1);
   const yLo = Math.log10(Math.max(quant(r.s.dp, .002), .05)), yHi = Math.log10(Math.max(quant(r.s.dp, .998), .2));
@@ -529,60 +634,15 @@ plainChart('cScatter', (canvas) => {
   $('capScatter').textContent =
     `Released gaze depth against convergence angle, one dot per frame, ${r.seq}. ` +
     (isFinite(baseline)
-      ? `The dashed curve is z = b / (2·tan(θ/2)) with b = ${F.cm(baseline)}, the median baseline implied by all ${recs.size} recordings.`
-      : `The implied-baseline curve is drawn once all ${FEATURED.length} recordings are read.`);
+      ? `The dashed curve is z = b / (2·tan(θ/2)) with b = ${F.cm(baseline)}, the median baseline implied by this recording's own frames.`
+      : `No frame here is away from the depth clamp, so no baseline can be implied.`);
 });
 
-/* ---------- distributions across all twelve ---------- */
-
-let pool = null;   // {yaw:[], pitch:[], depth:[], vergAbs:[]} in degrees / metres, all recordings
-
-function buildPool() {
-  const yaw = [], pitch = [], depth = [], vergAbs = [];
-  let frames = 0, missing = 0, finite = 0, negVerg = 0, clipped = 0, duration = 0;
-  let sumRate = 0, nRate = 0;
-  const bl = [], invZ = [], vg = [];
-  /* The far end of the released depth is a clamp: many frames share one maximum value. Read that
-     value off the data rather than assuming it, and keep those frames out of the baseline fit. */
-  let zMax = -Infinity;
-  for (const r of recs.values()) if (r.s.dp.length) zMax = Math.max(zMax, r.s.dp[r.s.dp.length - 1]);
-  const clampAt = isFinite(zMax) ? zMax - 1e-3 : Infinity;
-  for (const seq of FEATURED) {
-    const r = recs.get(seq);
-    if (!r) continue;
-    frames += r.F; missing += r.miss; duration += r.duration;
-    if (r.s.yl.length) { sumRate += r.rate; nRate++; }
-    const ym = meanArr(r.yl, r.yr);
-    for (let i = 0; i < r.F; i++) {
-      const v = r.verg[i], z = r.dp[i], p = r.pi[i];
-      if (!isFinite(v) || !isFinite(z) || !isFinite(p)) continue;
-      finite++;
-      if (v < 0) negVerg++;
-      yaw.push(ym[i] * DEG); pitch.push(p * DEG); depth.push(z); vergAbs.push(Math.abs(v) * DEG);
-      if (z >= clampAt) { clipped++; continue; }         // the far clamp would bias the baseline
-      bl.push(2 * z * Math.tan(Math.abs(v) / 2));
-      invZ.push(1 / z); vg.push(Math.abs(v));
-    }
-  }
-  // Pearson correlation between 1/depth and the convergence angle
-  const n = invZ.length;
-  if (n > 2) {
-    let mx = 0, my = 0;
-    for (let i = 0; i < n; i++) { mx += invZ[i]; my += vg[i]; }
-    mx /= n; my /= n;
-    let sxy = 0, sxx = 0, syy = 0;
-    for (let i = 0; i < n; i++) {
-      const a = invZ[i] - mx, b = vg[i] - my;
-      sxy += a * b; sxx += a * a; syy += b * b;
-    }
-    vergCorr = sxy / Math.sqrt(sxx * syy);
-  }
-  baseline = median(sorted(bl));
-  const asc = (a) => a.slice().sort((x, y) => x - y);      // sorted once; redraws reuse these
-  return { yaw, pitch, depth, vergAbs, frames, missing, finite, negVerg, clipped, duration, zMax,
-           yawS: asc(yaw), pitchS: asc(pitch), depthS: asc(depth), vergS: asc(vergAbs),
-           rate: nRate ? sumRate / nRate : NaN };
-}
+/* ---------- distributions within the selected recording ---------- *
+ * These two panels pooled every frame of all twelve recordings when the page fetched all twelve.
+ * A density and a histogram need the frames themselves, and summary.json carries only
+ * per-recording aggregates, so they now show the selected recording — the one payload already
+ * fetched for the traces above — and both captions name it. */
 
 plainChart('cDens', (canvas) => {
   const dpr = Math.min(devicePixelRatio || 1, 2);
@@ -591,7 +651,9 @@ plainChart('cDens', (canvas) => {
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  if (!pool || !pool.yaw.length) return;
+  const r = current();
+  const pool = r && r.stats;
+  if (!pool || !pool.yaw.length) { blank(canvas, waitMsg() || 'no frame in this recording has a gaze direction'); return; }
   const padL = 44, padR = 10, padT = 10, padB = 28;
   const xs = pool.yawS, ys = pool.pitchS;
   const x0 = Math.floor(quant(xs, .002) / 5) * 5, x1 = Math.ceil(quant(xs, .998) / 5) * 5;
@@ -641,8 +703,8 @@ plainChart('cDens', (canvas) => {
   ctx.strokeRect(padL + .5, padT + .5, pw - 1, ph - 1);
   $('capDens').textContent =
     `Gaze direction: mean of the two yaws (horizontal) against pitch (vertical, downward gaze ` +
-    `lower), degrees, over the ${F.n(pool.finite)} frames with gaze in the ${recs.size} ` +
-    `recordings. The axes span ${x0}° to ${x1}° yaw and ${y0}° to ${y1}° pitch, which holds ` +
+    `lower), degrees, over the ${F.n(pool.finite)} frames with gaze in ${r.seq} — the selected ` +
+    `recording, not the twelve. The axes span ${x0}° to ${x1}° yaw and ${y0}° to ${y1}° pitch, which holds ` +
     `${F.n(plotted)} of them; the rest fall outside and are not drawn. ` +
     `Dashed lines mark the medians, ${mx.toFixed(1)}° yaw and ${my.toFixed(1)}° pitch. ` +
     `Cell shading is the frame count in that cell, raised to the power 0.42 so the tails stay visible.`;
@@ -655,7 +717,9 @@ plainChart('cHist', (canvas) => {
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  if (!pool || !pool.depth.length) return;
+  const r = current();
+  const pool = r && r.stats;
+  if (!pool || !pool.depth.length) { blank(canvas, waitMsg() || 'no frame in this recording has a gaze depth'); return; }
   const padL = 46, padR = 10, padT = 10, padB = 28;
   const pw = w - padL - padR, ph = h - padT - padB;
   const ds = pool.depthS;
@@ -698,10 +762,11 @@ plainChart('cHist', (canvas) => {
   ctx.strokeStyle = HOT3D.css('--line-2');
   ctx.strokeRect(padL + .5, padT + .5, pw - 1, ph - 1);
   $('capHist').textContent =
-    `Gaze depth, logarithmic bins, over all ${F.n(pool.depth.length)} frames with gaze in the ` +
-    `${recs.size} recordings. Median ${F.m(md)} (dashed), quartiles ${F.m(quant(ds, .25))} and ` +
-    `${F.m(quant(ds, .75))}. The rightmost bar is a clamp: ${F.n(pool.clipped)} frames sit at ` +
-    `exactly ${ds[ds.length - 1].toFixed(2)} m, which is the largest depth anywhere in these recordings.`;
+    `Gaze depth, logarithmic bins, over the ${F.n(pool.depth.length)} frames with gaze in ` +
+    `${r.seq} — the selected recording, not the twelve. Median ${F.m(md)} (dashed), quartiles ` +
+    `${F.m(quant(ds, .25))} and ${F.m(quant(ds, .75))}. The rightmost bar is the top of the ` +
+    `released range: ${F.n(pool.clipped)} frames sit at exactly ` +
+    `${ds[ds.length - 1].toFixed(2)} m, the largest depth in this recording.`;
 });
 
 /* ---------- field table ---------- */
@@ -725,120 +790,159 @@ function fieldRow(cells, what) {
 function fillFieldTable() {
   const tb = document.querySelector('#fieldTab tbody');
   tb.textContent = '';
+  const r = current();
   for (const [name, shape, unit, key, what] of FIELD_DEFS) {
-    const all = [];
-    for (const r of recs.values()) for (const v of r[key]) if (isFinite(v)) all.push(v);
-    all.sort((a, b) => a - b);
-    const rng = !all.length ? 'no finite value'
+    /* r.s[key] is this recording's finite values, already sorted. The percentiles used to pool
+       every recording's frames; that needs all twelve payloads, so they are this recording's. */
+    const all = r ? r.s[key] : [];
+    const rng = !r ? (waitMsg() || '—')
+      : !all.length ? 'no finite value'
       : (unit === 'rad'
           ? `${F.deg(quant(all, .01))} … ${F.deg(quant(all, .99))}`
           : `${F.m(quant(all, .01))} … ${F.m(quant(all, .99))}`);
     tb.append(fieldRow([[name, 'mono'], [shape, 'mono'], [unit, 'mono'], [rng, 'num']], what));
   }
-  const seen = [...new Set([...recs.values()].map(r => r.source))].join(' / ') || '—';
-  tb.append(fieldRow([['gaze.source', 'mono'], ['scalar', 'mono'], ['string', 'mono'], [seen, 'num']],
+  /* one string per recording, so the summary carries all twelve of them */
+  const seen = corpus ? [...corpus.srcs.keys()].join(' / ') : (r ? r.source : '');
+  tb.append(fieldRow([['gaze.source', 'mono'], ['scalar', 'mono'], ['string', 'mono'],
+                      [seen || '—', 'num']],
     'Which eye-tracking calibration the service used for this recording: personalized or general.'));
-  $('fieldScope').textContent = recs.size === FEATURED.length
-    ? `${FEATURED.length} featured recordings`
-    : `${recs.size} recording${recs.size === 1 ? '' : 's'} read so far`;
+  $('fieldScope').textContent = r ? `the selected recording, ${r.seq}` : 'the selected recording';
 }
 
 /* ---------- main ---------- */
 
-function setFigs(p) {
-  $('fRecs').textContent = `${recs.size} / ${FEATURED.length}`;
-  $('fCov').textContent = F.pct(1 - p.missing / Math.max(p.frames, 1), 2);
-  $('fRate').textContent = isFinite(p.rate) ? `${p.rate.toFixed(1)} Hz` : '—';
-  $('fDepth').textContent = p.depthS.length ? F.m(median(p.depthS)) : '—';
-  $('fPitch').textContent = p.pitchS.length ? `${median(p.pitchS).toFixed(0)}°` : '—';
-  $('fVerg').textContent = p.vergS.length ? `${median(p.vergS).toFixed(1)}°` : '—';
+/** The six figures at the top, from summary.json. Totals are exact sums over the twelve rows; a
+ *  median here is the median of the twelve recordings' own medians, since pooling their frames
+ *  would mean fetching every payload. The update rate is not in the summary and is set from the
+ *  selected recording by select(). */
+function setFigs(c) {
+  $('fRecs').textContent = `${c.n} / ${FEATURED.length}`;
+  $('fCov').textContent = c.frames ? F.pct(c.withGaze / c.frames, 2) : '—';
+  $('fDepth').textContent = isFinite(c.medDepth) ? F.m(c.medDepth) : '—';
+  $('fPitch').textContent = isFinite(c.medPitch) ? `${c.medPitch.toFixed(0)}°` : '—';
+  $('fVerg').textContent = isFinite(c.medVerg) ? `${c.medVerg.toFixed(1)}°` : '—';
 }
 
-function fillVergence(p) {
-  const vs = p.vergS, ds = p.depthS;
-  if (!vs.length) { $('vergNote').textContent = 'No finite gaze in the recordings that loaded.'; return; }
-  const medV = median(vs), medD = median(ds);
-  const corrTxt = isFinite(vergCorr) ? vergCorr.toFixed(3) : 'not computable';
-  const predicted = baseline / (2 * Math.tan(medV / DEG / 2));
+/* the static first row of the card, kept so each new selection refills rather than appends */
+const VERG_KV_BASE = $('vergKv').innerHTML;
+
+function fillVergence(rec) {
   const kv = $('vergKv');
+  kv.innerHTML = VERG_KV_BASE;
+  const p = rec && rec.stats;
+  if (!p || !p.vergS.length) {
+    $('vergNote').textContent = rec
+      ? `${rec.seq} carries no frame with both a gaze depth and a yaw per eye.`
+      : (waitMsg() || 'Waiting for a recording.');
+    return;
+  }
+  const vs = p.vergS, ds = p.depthS;
+  const medV = median(vs), medD = median(ds);
+  const corrTxt = isFinite(p.corr) ? p.corr.toFixed(3) : 'not computable';
+  const predicted = p.baseline / (2 * Math.tan(medV / DEG / 2));
   const add = (k, v) => {
     const dt = document.createElement('dt'), dd = document.createElement('dd');
     dt.textContent = k; dd.innerHTML = v; kv.append(dt, dd);
   };
-  add('median θ', `<span class="mono">${medV.toFixed(2)}°</span> convergence, across ${F.n(vs.length)} frames`);
-  add('implied b', `<span class="mono">${F.cm(baseline)}</span> median interocular baseline, from b = 2·z·tan(θ/2)`);
+  add('median θ', `<span class="mono">${medV.toFixed(2)}°</span> convergence, across ${F.n(vs.length)} frames of ${F.seq(rec.seq)}`);
+  add('implied b', `<span class="mono">${F.cm(p.baseline)}</span> median interocular baseline, from b = 2·z·tan(θ/2)`);
   add('θ → z', `<span class="mono">${F.m(predicted)}</span> at the median angle, against a released median depth of <span class="mono">${F.m(medD)}</span>`);
   add('corr', `<span class="mono">${corrTxt}</span> between 1/depth and θ`);
   $('vergNote').textContent =
-    `Left yaw is below right yaw on ${F.n(p.negVerg)} of ${F.n(p.finite)} frames with gaze ` +
-    `(${(100 * p.negVerg / Math.max(p.finite, 1)).toFixed(1)}%), so the sign of the difference is ` +
+    `In this recording, left yaw is below right yaw on ${F.n(p.negVerg)} of ${F.n(p.finite)} frames ` +
+    `with gaze (${(100 * p.negVerg / Math.max(p.finite, 1)).toFixed(1)}%), so the sign of the difference is ` +
     `a convention and its magnitude is the convergence. Depth and angle carry the same information: ` +
     `1/depth tracks θ with a correlation of ${corrTxt}, and the baseline that relation ` +
-    `implies, ${F.cm(baseline)}, is an adult interocular distance. The ${F.n(p.clipped)} frames ` +
-    `sitting at the largest released depth, ${F.m(p.zMax)}, are a clamp rather than a measurement ` +
-    `and are left out of that fit. There the angle is at the limit of what vergence can resolve: ` +
-    `past a few metres a fraction of a degree moves the distance by metres.`;
+    `implies, ${F.cm(p.baseline)}, is an adult interocular distance. The ${F.n(p.clipped)} frames ` +
+    `sitting at the largest released depth here, ${F.m(p.zMax)}, are the top of the released range ` +
+    `rather than a measurement and are left out of that fit. There the angle is at the limit of what ` +
+    `vergence can resolve: past a few metres a fraction of a degree moves the distance by metres.`;
 }
 
-async function run() {
-  const order = [FIRST, ...FEATURED.filter(s => s !== FIRST)];
-  const pick = $('pick');
+/* ---------- selection: one payload at a time ---------- */
+
+let token = 0;            // a slow payload must not overwrite a newer pick when it finally lands
+
+/** the two pills beside the picker come from the summary, so they are right before the fetch */
+function setPills(seq) {
+  const row = rows.get(seq), g = row && row.gaze;
+  $('pickSrc').textContent = g && g.source ? `${g.source} calibration` : '—';
+  $('pickFrames').textContent = row ? `${F.n(row.F)} frames · ${F.s(row.duration_s, 1)}` : '—';
+}
+
+/** everything that belongs to the previous recording, cleared while the next one is in flight */
+function clearSelected(msg, isErr) {
+  for (const id of ['capYaw', 'capPitch', 'capDepth', 'capVerg', 'capScatter', 'capDens', 'capHist']) {
+    $(id).textContent = msg;
+  }
+  $('cursor').textContent = 'hover a chart to read the frame under the cursor';
+  $('missLine').textContent = msg;
+  $('missLine').className = isErr ? 'err' : 'note';
+  $('gapList').innerHTML = '';
+  $('holdLine').textContent = '';
+  $('fRate').textContent = '—';
+  $('vergKv').innerHTML = VERG_KV_BASE;
+  $('vergNote').textContent = msg;
+  $('distIntro').className = isErr ? '' : 'loading';
+  $('distIntro').textContent = msg;
+  fillFieldTable();
+  redrawAll();
+}
+
+async function select(seq) {
+  if (!seq) return;
+  const mine = ++token;
+  setPills(seq);
   /* setCursor(null), not `cursorIdx = null`: the readout text belongs to the old recording and
      has to be cleared with it, or it is left standing under the new recording's charts. */
-  pick.addEventListener('change', () => { describeSelected(); setCursor(null); redrawAll(); });
-
-  let failed = 0;
-  for (let k = 0; k < order.length; k++) {
-    $('loadLine').textContent = `reading gaze from payload ${k + 1} of ${order.length} — ${order[k]}…`;
+  setCursor(null);
+  if (!recs.has(seq)) {
+    view = { seq, state: 'loading' };
+    clearSelected(`loading data/seq/${seq}.json …`, false);
     try {
-      const rec = await loadGaze(order[k]);
-      recs.set(rec.seq, rec);
-      addRow(rec);
-      const opt = document.createElement('option');
-      opt.value = rec.seq; opt.textContent = `${rec.seq} · ${rec.participant}`;
-      pick.append(opt);
-      if (recs.size === 1) {
-        pick.value = rec.seq;
-        describeSelected();
-        redrawAll();
-        fillFieldTable();
-        if (rec.rgb) {
-          $('rgbModel').textContent = String(rec.rgb.projectionModelType).replace('CameraModelType.', '');
-          $('rgbSize').textContent = `${rec.rgb.imageWidth}×${rec.rgb.imageHeight}`;
-          $('rgbParams').textContent = String(rec.rgb.projectionParams.length);
-        }
-      }
+      const rec = await loadGaze(seq);
+      if (mine !== token) return;             // a newer selection won while this was in flight
+      recs.set(seq, rec);
     } catch (e) {
-      failed++;
-      $('loadLine').innerHTML = `<span class="err">could not read ${order[k]}: ${e.message}</span>`;
+      if (mine !== token) return;
+      view = { seq, state: 'error' };
+      clearSelected(`this recording could not be read: ${e.message}`, true);   // e names the file
+      return;
     }
   }
-  if (!recs.size) {
-    $('loadLine').innerHTML = '<span class="err">No payload could be read; every figure on this page comes from data/seq/*.json.</span>';
-    $('distIntro').innerHTML = '<span class="err">No data to summarise.</span>';
-    $('calLine').innerHTML = '<span class="err">No calibration source could be read.</span>';
-    return;
-  }
-  /* The first payload read is the one selected by default, so the table and the picker are in
-     fetch order until they are put back into sequence order here (append moves existing nodes). */
-  const keep = pick.value;
-  for (const seq of FEATURED) {
-    const r = recs.get(seq);
-    if (!r) continue;
-    $('seqBody').append(r.tr);
-    const opt = [...pick.options].find(o => o.value === seq);
-    if (opt) pick.append(opt);
-  }
-  pick.value = keep;                       // reordering options can drop the selection
+  if (mine !== token) return;
+  view = { seq, state: 'ready' };
+  const rec = recs.get(seq);
 
+  fillRate(rec);
+  $('fRate').textContent = rec.runs ? `${rec.rate.toFixed(1)} Hz` : '—';
+  if (rec.rgb) {
+    $('rgbModel').textContent = String(rec.rgb.projectionModelType).replace('CameraModelType.', '');
+    $('rgbSize').textContent = `${rec.rgb.imageWidth}×${rec.rgb.imageHeight}`;
+    $('rgbParams').textContent = String(rec.rgb.projectionParams.length);
+  }
+  $('missLine').className = 'note';
+  describeSelected();
   fillFieldTable();
-  pool = buildPool();
-  setFigs(pool);
-  fillVergence(pool);
+  fillVergence(rec);
 
-  const srcs = new Map();
-  for (const r of recs.values()) srcs.set(r.source, (srcs.get(r.source) || 0) + 1);
-  const srcTxt = [...srcs.entries()].map(([k, v]) => `${v} ${k}`).join(', ');
+  const cross = corpus
+    ? ` Across the twelve featured recordings the summary counts ${F.n(corpus.withGaze)} frames with ` +
+      `gaze, ${(corpus.duration / 60).toFixed(1)} minutes of recording from ${corpus.participants} ` +
+      `participants; pooling their frames into one panel would mean fetching all twelve payloads.`
+    : '';
+  $('distIntro').className = '';
+  $('distIntro').textContent =
+    `Both panels read the selected recording, ${rec.seq}: ${F.n(rec.stats.finite)} frames with gaze, ` +
+    `${F.s(rec.duration, 1)} at ${rec.fps} fps. Medians are marked on each.` + cross;
+  redrawAll();
+}
+
+/* ---------- start ---------- */
+
+async function fillCalLine() {
+  const srcTxt = [...corpus.srcs.entries()].map(([k, v]) => `${v} ${k}`).join(', ');
   let ariaLine = '';
   try {
     const ix = await HOT3D.index();
@@ -846,25 +950,64 @@ async function run() {
     const withGaze = aria.filter(r => r.has.eye_gaze).length;
     ariaLine = ` Across the whole Aria set, ${F.n(withGaze)} of ${F.n(aria.length)} recordings list an ` +
       `eye-gaze file in the index, which records only that the file exists, not which calibration produced it.`;
-  } catch (e) { /* the per-recording table below is the primary statement */ }
+  } catch (e) { /* the per-recording table above is the primary statement */ }
   $('calLine').className = 'note';
   $('calLine').textContent =
-    `Of the ${recs.size} featured recordings read here: ${srcTxt}. A personalized calibration means ` +
+    `Of the ${corpus.n} featured recordings: ${srcTxt}. A personalized calibration means ` +
     `the wearer ran the eye-calibration routine before recording; the general model is the fallback ` +
     `when they did not.` + ariaLine;
+}
 
-  $('loadLine').className = 'note';
-  $('loadLine').textContent = failed
-    ? `${recs.size} of ${FEATURED.length} payloads read; ${failed} failed. Figures below cover the ones that loaded.`
-    : `All ${FEATURED.length} payloads read: ${F.n(pool.frames)} frames, ` +
-      `${F.n(pool.missing)} of them without gaze (${F.pct(pool.missing / pool.frames, 2)}).`;
-  $('distIntro').className = '';
-  $('distIntro').textContent =
-    `Both panels pool every frame with gaze in the ${recs.size} recordings read: ` +
-    `${F.n(pool.finite)} frames, ${(pool.duration / 60).toFixed(1)} minutes of recording from ` +
-    `${new Set([...recs.values()].map(r => r.participant)).size} participants. ` +
-    `Medians are marked on each.`;
-  redrawAll();
+async function run() {
+  const pick = $('pick');
+  pick.addEventListener('change', () => { select(pick.value); });
+
+  let list = [];
+  try {
+    const s = await HOT3D.json('data/summary.json');
+    const bySeq = new Map((s.recordings || []).map(r => [r.seq, r]));
+    list = FEATURED.map(seq => bySeq.get(seq)).filter(r => r && r.gaze);
+  } catch (e) {
+    /* the cross-recording half is lost, the per-recording half is not: the picker still works and
+       the payload it fetches carries everything the views below need */
+    $('loadLine').className = '';
+    $('loadLine').innerHTML =
+      `<span class="err">data/summary.json could not be read: ${e.message}.</span> ` +
+      `The twelve-recording figures and table stay empty; the views below still work, one recording at a time.`;
+    $('calLine').className = 'note';
+    $('calLine').innerHTML = '<span class="err">No calibration source could be read.</span>';
+  }
+
+  for (const row of list) { rows.set(row.seq, row); addRow(row); }
+  for (const seq of (list.length ? list.map(r => r.seq) : FEATURED)) {
+    const row = rows.get(seq);
+    const opt = document.createElement('option');
+    opt.value = seq;
+    opt.textContent = row ? `${seq} · ${row.participant}` : seq;
+    pick.append(opt);
+  }
+  pick.value = [...pick.options].some(o => o.value === FIRST) ? FIRST
+    : (pick.options[0] ? pick.options[0].value : '');
+
+  if (list.length) {
+    corpus = buildCorpus(list);
+    setFigs(corpus);
+    $('loadLine').className = 'note';
+    $('loadLine').textContent =
+      `All ${corpus.n} featured recordings, from data/summary.json: ${F.n(corpus.frames)} frames, ` +
+      `${F.n(corpus.missing)} of them without gaze (${F.pct(corpus.missing / Math.max(corpus.frames, 1), 2)}). ` +
+      `The depth, pitch and convergence above are medians of the twelve recordings' own medians. ` +
+      `Everything per frame below reads one payload: the recording selected here.`;
+  }
+  fillFieldTable();
+
+  /* The tables above are already on screen and need nothing more. The selected recording's
+     payload is several MB, so it waits until the reader is near the per-frame section; the index
+     the calibration line quotes is small and goes out now. */
+  let selected = Promise.resolve();
+  HOT3D.whenVisible(pick.closest('section') || pick, () => { selected = select(pick.value); });
+  if (list.length) await fillCalLine();
+  await selected;
 }
 
 /* redraw on theme change, on resize, and after fonts settle */

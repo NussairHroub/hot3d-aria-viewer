@@ -71,15 +71,17 @@
       <thead><tr>
         <th class="no-sort">mask</th>
         <th class="no-sort">1 means</th>
-        <th class="no-sort">across the three streams, in the 12 featured recordings</th>
+        <th class="no-sort">pass rate per stream, over the 12 featured recordings</th>
       </tr></thead>
       <tbody id="defsBody"></tbody>
     </table>
   </div>
-  <p class="note">The last column is computed from the twelve featured recordings: for every frame annotated on all
-  three streams, whether <code>rgb</code>, <code>slam_left</code> and <code>slam_right</code> carry the
-  same value. The three pose masks are properties of the timestamp, not of a camera; the exposure and
-  visibility masks are properties of one image and differ between streams.</p>
+  <p class="note">The last column comes from <code>data/summary.json</code>: for each stream, the passes
+  divided by the annotated frames, summed over the twelve featured recordings. The three pose masks come
+  out at the same rate on all three streams — they are properties of the timestamp, not of a camera —
+  while the exposure and visibility masks differ, being properties of one image. Whether two streams
+  agree <em>frame by frame</em> is a stronger question: it needs the per-frame mask arrays, which this
+  page now fetches only for the recording selected below, so it is no longer computed across all twelve.</p>
 
   <h2>One recording, frame by frame</h2>
   <p>Each row below is one mask over the whole recording, left to right in time. Green is a pass, red a
@@ -127,9 +129,10 @@
 
   <h2>The twelve featured recordings compared</h2>
   <p>Pass rate per mask on the stream selected above, worst first. Click a column to sort by it. Cells
-  are tinted by how much of the recording the mask rejects. The masks exist only inside the per-recording
-  files, so this table is filled in as all twelve payloads and their hand files are read.</p>
-  <p class="loading" id="sweepNote">Reading the twelve sequence payloads and hand files…</p>
+  are tinted by how much of the recording the mask rejects. The per-mask counts for all twelve are read
+  from <code>data/summary.json</code>, which aggregates the same payloads and hand files offline, so the
+  table arrives without fetching sixty-six megabytes of per-frame arrays.</p>
+  <p class="loading" id="sweepNote">Reading data/summary.json…</p>
   <div class="table-wrap">
     <table id="heatTable">
       <thead><tr id="heatHead"></tr></thead>
@@ -187,15 +190,21 @@ const MASKS = [
   { k: 'object_pose_available', s: 'obj pose', src: 'seq',
     d: 'object pose ground truth exists at this frame’s timestamp.' },
 ];
-/** what to say about a mask this page could not read, which depends on which file it lives in */
+/** what to say about a mask this page could not read, which depends on where it should have come
+ *  from: the recording's own hand file, or the hand figures aggregated into data/summary.json */
 const missingWhy = (m, ex) => (m.src === 'hands' && ex && !ex.handsOk)
-  ? 'hand mask file not read'
+  ? (ex.summaryRow ? 'no hand mask in the summary' : 'hand mask file not read')
   : 'no mask for this stream';
 
 const state = { seq: 'P0011_72efb935', stream: 'rgb', sortKey: 'qa_pass', sortDir: 1,
                 hover: null, histHover: null };
 const el = (id) => document.getElementById(id);
-const sweep = new Map();      // seq -> {F, fps, dur, participant, objects, stats, disagree, failed}
+/* Everything that spans the twelve recordings is read from data/summary.json (tens of KB), never
+   from the twelve payloads (46 MB) and their hand files (20 MB). A payload is fetched only for the
+   recording the reader has selected, because only the per-frame strip needs the arrays. */
+const SUMMARY = 'data/summary.json';
+const sweep = new Map();      // seq -> {F, fps, dur, participant, handsOk, stats, failed}
+let summaryFailed = false;
 let current = null;           // decoded arrays for the selected recording
 let stripGeom = null, stripBase = null;
 let loadToken = 0;            // guards against a slow payload overwriting a newer selection
@@ -222,31 +231,55 @@ function extract(p, h) {
   const out = { seq: p.seq, F: p.F, fps: p.fps, dur: p.duration_s, participant: p.participant,
                 objects: p.summary ? p.summary.objects : null,
                 handsOk: !!(h && h.masks && h.F === p.F),
-                stats: {}, disagree: {}, arrays: null };
+                stats: {}, arrays: null };
   const from = { seq: (p.masks || {}), hands: (out.handsOk ? h.masks : {}) };
   const arrays = {};
   for (const m of MASKS) {
     out.stats[m.k] = {}; arrays[m.k] = {};
-    const per = {};
     const holder = from[m.src];
     for (const st of STREAMS) {
       const b = holder && holder[m.k] ? holder[m.k][st] : null;
       if (!b) { out.stats[m.k][st] = null; arrays[m.k][st] = null; continue; }
       const a = HOT3D.u8(b);
       out.stats[m.k][st] = statOf(a, p.fps);
-      arrays[m.k][st] = a; per[st] = a;
+      arrays[m.k][st] = a;
     }
-    let dis = 0, cmp = 0;
-    if (per.rgb && per.slam_left && per.slam_right) {
-      for (let i = 0; i < p.F; i++) {
-        const a = per.rgb[i], b = per.slam_left[i], c = per.slam_right[i];
-        if (a === 255 || b === 255 || c === 255) continue;
-        cmp++; if (a !== b || b !== c) dis++;
-      }
-    }
-    out.disagree[m.k] = { dis, cmp };
   }
   out.arrays = arrays;
+  return out;
+}
+
+/** One row of data/summary.json, in the same shape extract() produces — minus the per-frame arrays,
+ *  which the summary does not carry and the cross-recording views do not need. The summary's mask
+ *  block stores, per mask and per stream, the annotated count, the frame count and the pass rate,
+ *  all computed offline from these same payloads with the same rule: a 255 is neither a pass nor a
+ *  failure, so `annotated` is the denominator and `frames` only says how long the stream is. */
+function fromSummary(row) {
+  const out = { seq: row.seq, F: row.F, fps: row.fps, dur: row.duration_s,
+                participant: row.participant,
+                objects: Array.isArray(row.objects) ? row.objects.length : null,
+                // the two hand masks are aggregated from the separately licensed hand file; a row
+                // that has none must report them as unread, exactly as a failed hand fetch does
+                handsOk: !!(row.masks && row.masks.hand_visible && row.masks.hand_pose_available),
+                stats: {}, arrays: null, summaryRow: true };
+  for (const m of MASKS) {
+    out.stats[m.k] = {};
+    const blk = (row.masks || {})[m.k];
+    for (const st of STREAMS) {
+      const s = blk ? blk[st] : null;
+      if (!s) { out.stats[m.k][st] = null; continue; }
+      const ann = s.annotated, n = s.frames;
+      // The rate is stored rounded to four decimals, so rate × annotated is within half a frame of
+      // the true pass count at these frame counts (≤ 4k) and rounds back to it exactly. The rate is
+      // then recomputed from that integer rather than used as stored: a stored 0.9975 against a true
+      // 0.997493 renders as 99.8% instead of 99.7%, and seven of the 252 cells sit that close to a
+      // rounding boundary. pass / ann is the same division statOf() does, so the two agree bit for bit.
+      const pass = (ann && isFinite(s.rate)) ? Math.round(s.rate * ann) : 0;
+      out.stats[m.k][st] = { n, ann, na: n - ann, pass, fail: ann - pass,
+                             rate: ann ? pass / ann : NaN,
+                             longest: null, at: -1, longestS: NaN };
+    }
+  }
   return out;
 }
 
@@ -499,11 +532,15 @@ async function loadSelected(seq) {
     const ex = extract(p, h);
     ex.t = HOT3D.f32(p.t);
     current = ex;
-    if (!sweep.has(seq)) { sweep.set(seq, ex); renderHeat(); }
     el('seqMeta').textContent =
       `${ex.participant} · ${HOT3D.fmt.n(ex.F)} frames · ${HOT3D.fmt.s(ex.dur, 1)} · ${ex.objects} objects`;
     state.hover = null;
     drawStrip(); renderRates(); readoutText();
+    // the comparison table is filled from the summary; only if that could not be read is the one
+    // recording in hand worth adding to it, so the table is not left empty
+    if (!(await summaryReady) && token === loadToken && !sweep.has(seq)) {
+      sweep.set(seq, ex); renderHeat(); renderDefs();
+    }
   } catch (e) {
     if (token !== loadToken) return;
     // nothing on the panel may keep describing the recording that is no longer selected
@@ -517,54 +554,48 @@ async function loadSelected(seq) {
   }
 }
 
-/* ---------- sweep of all twelve ---------- */
+/* ---------- the twelve, from the precomputed summary ---------- */
 
-async function sweepAll() {
-  const queue = FEATURED.slice();
-  let done = 0, failed = 0;
+/** Read data/summary.json and fill the sweep from it. Resolves true when the twelve are in hand,
+ *  false when they are not — the caller then falls back to whatever single recording it loaded. */
+async function loadSummary() {
   const note = el('sweepNote');
-  const one = async (seq) => {
-    try {
-      // the selected recording is already cached by the runtime; the rest are read once and
-      // released, so only the masks stay in memory rather than twelve whole payloads.
-      // Two files per recording now: the payload, and the separately licensed hand file.
-      if (!sweep.has(seq)) {
-        const get = async (path) => {
-          const r = await fetch(path);
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          return r.json();
-        };
-        const [p, h] = seq === state.seq
-          ? await Promise.all([HOT3D.sequence(seq), HOT3D.hands(seq).catch(() => null)])
-          : await Promise.all([get(`data/seq/${seq}.json`),
-                               get(`data/hands/${seq}.hands.json`).catch(() => null)]);
-        sweep.set(seq, extract(p, h));
-      }
-    } catch (e) {
-      failed++; sweep.set(seq, { seq, failed: true });
+  try {
+    const doc = await HOT3D.json(SUMMARY);
+    const bySeq = new Map((doc.recordings || []).map(r => [r.seq, r]));
+    // insertion order is FEATURED order, so recordings that tie on the sort key keep a stable place
+    for (const seq of FEATURED) {
+      const row = bySeq.get(seq);
+      if (row) sweep.set(seq, fromSummary(row));
     }
-    done++;
-    note.textContent = done < FEATURED.length
-      ? `Reading the twelve sequence payloads and hand files — ${done} of ${FEATURED.length}…`
-      : '';
-    renderHeat();
-  };
-  const workers = new Array(3).fill(0).map(async () => {
-    while (queue.length) await one(queue.shift());
-  });
-  await Promise.all(workers);
-  const noHands = [...sweep.values()].filter(ex => !ex.failed && !ex.handsOk).length;
-  note.textContent = failed
-    ? `${failed} of ${FEATURED.length} payloads could not be read; the table shows the rest.`
-    : `Computed from all ${FEATURED.length} featured recordings (${HOT3D.fmt.n(totalFrames())} frames), ` +
-      `reading each payload and its hand file.`;
-  if (noHands) {
-    note.textContent += ` The hand file is missing for ${noHands} of them, so their two hand-mask ` +
-      `columns are left empty rather than filled with a guess.`;
+    const rows = [...sweep.values()].filter(ex => !ex.failed);
+    if (!rows.length) throw new Error('no featured recording in the summary');
+    const missing = FEATURED.length - rows.length;
+    const noHands = rows.filter(ex => !ex.handsOk).length;
+    note.textContent =
+      `Computed from ${SUMMARY}, which aggregates ${rows.length === FEATURED.length ? 'all ' : ''}` +
+      `${rows.length} featured recording${rows.length === 1 ? '' : 's'} ` +
+      `(${HOT3D.fmt.n(totalFrames())} frames) offline from the same payloads and hand files. ` +
+      `Only the recording selected above is fetched in full.`;
+    if (missing) {
+      note.textContent += ` ${missing} of the ${FEATURED.length} featured recordings ` +
+        `${missing === 1 ? 'is' : 'are'} not in the summary and ${missing === 1 ? 'is' : 'are'} left out of the table.`;
+    }
+    if (noHands) {
+      note.textContent += ` The summary carries no hand masks for ${noHands} of them, so their two ` +
+        `hand-mask columns are left empty rather than filled with a guess.`;
+    }
+    note.className = 'note';
+    renderHeat(); renderDefs(); closingExample();
+    return true;
+  } catch (e) {
+    summaryFailed = true;
+    note.className = 'note';
+    note.textContent = `Could not read ${SUMMARY} (${e.message}), so the twelve are not compared here. ` +
+      `Only the recording selected above is shown, from its own payload.`;
+    renderHeat(); renderDefs();
+    return false;
   }
-  note.className = 'note';
-  renderDefs();
-  closingExample();
 }
 
 /** the sharpest case among the twelve: lowest object_pose_available against its own qa_pass */
@@ -577,12 +608,14 @@ function closingExample() {
     if (!worst || op.rate < worst.op.rate) worst = { ex, op, qa };
   }
   if (!worst) return;
+  // how long the longest unposed run is needs the per-frame array; the count of frames without a
+  // pose does not, so that is what is stated here (see the strip above for the runs themselves)
   el('closingEx').innerHTML =
     `The sharpest case among the twelve is <code>${worst.ex.seq}</code>: ` +
     `<span class="mono">${HOT3D.fmt.pct(worst.qa.rate)}</span> of its ${HOT3D.fmt.n(worst.ex.F)} RGB frames pass ` +
     `<code>qa_pass</code>, but only <span class="mono">${HOT3D.fmt.pct(worst.op.rate)}</span> carry an object pose — ` +
-    `a single run of ${HOT3D.fmt.s(worst.op.longestS, 1)} with no object pose at all, out of ` +
-    `${HOT3D.fmt.s(worst.ex.dur, 1)} recorded.`;
+    `${HOT3D.fmt.n(worst.op.fail)} of the ${HOT3D.fmt.n(worst.op.ann)} annotated frames have none, in ` +
+    `${HOT3D.fmt.s(worst.ex.dur, 1)} of recording.`;
 }
 
 function totalFrames() {
@@ -591,27 +624,50 @@ function totalFrames() {
   return n;
 }
 
+/** One mask's pass rate on each stream, pooled over the recordings in hand: passes over annotated
+ *  frames, summed. Pooling counts rather than averaging rates keeps a short recording from weighing
+ *  as much as a long one, and a 255 stays out of both sides. */
+function streamRates(rows, mask) {
+  return STREAMS.map(st => {
+    let pass = 0, ann = 0;
+    for (const ex of rows) {
+      const s = ex.stats[mask] ? ex.stats[mask][st] : null;
+      if (!s || !s.ann) continue;
+      pass += s.pass; ann += s.ann;
+    }
+    return { st, pass, ann, rate: ann ? pass / ann : NaN };
+  });
+}
+
 function renderDefs() {
   const ready = [...sweep.values()].filter(ex => !ex.failed);
   el('defsBody').innerHTML = MASKS.map(m => {
-    // a hand mask can only be compared in the recordings whose hand file was read
+    // a hand mask can only be reported for the recordings whose hand masks reached the page
     const have = ready.filter(ex => m.src !== 'hands' || ex.handsOk);
-    let cell = '<span class="loading">reading payloads…</span>';
-    if (ready.length && !have.length) {
-      cell = '<span class="note">no hand file could be read, so this mask is not compared</span>';
+    let cell = '<span class="loading">reading the summary…</span>';
+    if (summaryFailed && !have.length) {
+      cell = `<span class="note">${SUMMARY} could not be read, so the twelve are not compared</span>`;
+    } else if (ready.length && !have.length) {
+      cell = '<span class="note">no hand mask reached this page, so this mask is not compared</span>';
     } else if (have.length) {
-      let dis = 0, recs = 0, cmp = 0;
-      for (const ex of have) {
-        const d = ex.disagree[m.k];
-        if (!d) continue;
-        dis += d.dis; cmp += d.cmp; if (d.dis) recs++;
+      const per = streamRates(have, m.k);
+      const fin = per.filter(p => isFinite(p.rate));
+      if (!fin.length) {
+        cell = '<span class="note">not annotated on any stream in these recordings</span>';
+      } else {
+        // the spread is the gap between the streams' own rates — it says nothing about whether two
+        // streams agree on any one frame, which needs the per-frame arrays. It is measured on the
+        // rounded figures printed beside it, so the words never contradict the numbers shown.
+        const shown = fin.map(p => Number((p.rate * 100).toFixed(1)));
+        const spread = Math.round((Math.max(...shown) - Math.min(...shown)) * 10) / 10;
+        const tail = spread === 0
+          ? '<span style="color:var(--ok)">the same rate on all three</span>'
+          : `spread <span class="mono">${spread.toFixed(1)}</span> pt`;
+        const scope = have.length === FEATURED.length
+          ? '' : `, over ${have.length} of the ${FEATURED.length}`;
+        cell = per.map(p => `${p.st} <span class="mono">${HOT3D.fmt.pct(p.rate)}</span>`).join(' · ') +
+               ` — <span class="note">${tail}${scope}</span>`;
       }
-      // no comparable frame is not the same as agreement on every frame
-      cell = cmp === 0
-        ? '<span class="note">not comparable — no frame is annotated on all three streams</span>'
-        : dis === 0
-          ? `<span style="color:var(--ok)">identical on all three</span> — ${HOT3D.fmt.n(cmp)} frames compared`
-          : `differs on <span class="mono">${HOT3D.fmt.n(dis)}</span> of ${HOT3D.fmt.n(cmp)} frames, in ${recs} of ${have.length} recordings`;
     }
     const where = m.src === 'hands' ? ' <span class="note">(hand file)</span>' : '';
     return `<tr><td>${m.k}${where}</td><td>${m.d}</td><td>${cell}</td></tr>`;
@@ -659,7 +715,7 @@ function renderHeat() {
       const st = ex.stats[m.k] ? ex.stats[m.k][stream] : null;
       if (!st) {
         const why = missingWhy(m, ex);
-        return `<td class="heat note" title="${why}">${why === 'hand mask file not read' ? 'no file' : 'no mask'}</td>`;
+        return `<td class="heat note" title="${why}">${m.src === 'hands' && !ex.handsOk ? 'no file' : 'no mask'}</td>`;
       }
       if (!st.ann) return '<td class="heat note" title="every frame is 255 on this stream">not annot.</td>';
       const t = `${m.k} / ${stream}: ${HOT3D.fmt.n(st.pass)} of ${HOT3D.fmt.n(st.ann)} frames pass`;
@@ -667,7 +723,9 @@ function renderHeat() {
     }).join('');
     const sel = ex.seq === state.seq ? ' style="font-weight:600"' : '';
     return `<tr${sel}><td class="mono">${ex.seq}</td><td class="num">${HOT3D.fmt.n(ex.F)}</td>${cells}</tr>`;
-  }).join('') || '<tr><td colspan="9" class="loading">reading payloads…</td></tr>';
+  }).join('') || (summaryFailed
+    ? `<tr><td colspan="9" class="note">${SUMMARY} could not be read</td></tr>`
+    : '<tr><td colspan="9" class="loading">reading the summary…</td></tr>');
 
   const worst = el('worstList');
   if (rows.length < 2) { worst.innerHTML = ''; return; }
@@ -682,9 +740,12 @@ function renderHeat() {
     if (best.st.fail === 0) {
       return `<li><span class="mono">${m.k}</span>: never 0 on ${stream} in any of the ${rows.length}</li>`;
     }
+    // how long that recording's worst run of 0s is needs its per-frame array; the strip above
+    // reports it for the recording selected, and the summary carries counts, not runs
+    const run = isFinite(best.st.longestS) ? `, worst run ${HOT3D.fmt.s(best.st.longestS, 1)}` : '';
     return `<li>worst <span class="mono">${m.k}</span>: <code>${best.seq}</code> at ` +
            `<span class="mono">${HOT3D.fmt.pct(best.rate)}</span> ` +
-           `(${HOT3D.fmt.n(best.st.fail)} frames rejected, worst run ${HOT3D.fmt.s(best.st.longestS, 1)})</li>`;
+           `(${HOT3D.fmt.n(best.st.fail)} frames rejected${run})</li>`;
   }).join('');
 }
 
@@ -881,7 +942,12 @@ for (const [id, v] of [['swOk', '--ok'], ['swBad', '--bad'], ['swNa', '--line-2'
 
 renderDefs();
 loadIndex();
-loadSelected(state.seq).then(sweepAll);
+/* Three fetches on load: data/index.json for the release-wide histogram, data/summary.json for the
+   twelve compared, and the selected recording's own payload pair for the per-frame strip. */
+const summaryReady = loadSummary();
+/* The per-frame strip needs one recording's payload pair (several MB); everything above it comes
+   from summary.json, so the fetch waits until the strip is near the viewport. */
+HOT3D.whenVisible(el('strip'), () => loadSelected(state.seq));
 </script>
 </body>
 </html>

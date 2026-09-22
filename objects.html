@@ -85,17 +85,17 @@
   <h2>Motion in the twelve featured recordings</h2>
   <p>Twelve Aria recordings are served here with their full per-frame payloads, and between them
   they cover all 33 objects. For each object below: how far its ground-truth position track runs,
-  the same figure per minute of recording, the share of frames in which it has a pose at all, and
-  the share in which the release also reports it as visible in the RGB image. Travel is summed
-  frame to frame over <em>consecutive annotated frames only</em>: a gap in the pose track is left
-  open, never crossed in one straight jump, so for a partly annotated object the figure is a lower
-  bound. It also accumulates annotation noise, so an object that never leaves the table still reads
-  a little above zero; treat small values as "stationary", not as an exact distance. Visible means
-  the released per-frame visibility ratio for the RGB box is above zero — the release also emits a
-  box for frames where the object is inside the image but fully occluded, and those do not count
-  here. (The payload's own <span class="mono">travel_m</span> field joins consecutive annotated
+  the same figure per minute of recording, and the share of frames in which it has a pose at all.
+  Travel is summed frame to frame over <em>consecutive annotated frames only</em>: a gap in the
+  pose track is left open, never crossed in one straight jump, so for a partly annotated object the
+  figure is a lower bound. It also accumulates annotation noise, so an object that never leaves the
+  table still reads a little above zero; treat small values as "stationary", not as an exact
+  distance. (The release's own <span class="mono">travel_m</span> field joins consecutive annotated
   samples straight across gaps, which inflates partly annotated tracks, so it is not used.)</p>
-  <p class="loading" id="mstat">reading the twelve featured payloads …</p>
+  <p>The table is read from <span class="mono">data/summary.json</span>, a 44 KB file in which these
+  per-recording figures are precomputed from the same twelve payloads, with the same gap handling.
+  The payloads themselves — some 48 MB — are not fetched by this page.</p>
+  <p class="loading" id="mstat">reading data/summary.json …</p>
   <div class="table-wrap">
     <table id="motTbl">
       <thead><tr id="motHead"></tr></thead>
@@ -250,72 +250,64 @@ function renderLibTable() {
 
 /* ---------- motion across the twelve featured payloads ---------- */
 
-/* The featured recordings are the twelve that ship a full per-frame payload under data/seq/. */
-const FEATURED = ['P0001_4bf4e21a', 'P0002_65085bfc', 'P0003_ebdc6ff7', 'P0009_e71e2f24',
-  'P0010_573b2de6', 'P0010_8ff3e5c4', 'P0011_2255f410', 'P0011_72efb935', 'P0012_130a66e1',
-  'P0014_1fdca00e', 'P0015_cc5dfd13', 'P0015_e7458eb3'];
+/* This table spans every featured recording, so it used to fold in all twelve per-frame payloads —
+   48 MB fetched before the first row appeared. data/summary.json carries the same per-recording
+   figures, precomputed by scripts/hot3d_summary.py from those payloads with the page's own NaN
+   handling, so one 44 KB fetch now fills the table. Nothing on this page needs per-frame arrays,
+   so no payload is fetched here at all. */
+
+function motFailed(why) {
+  const el = $('mstat');
+  el.hidden = false;
+  el.className = 'warn-box';
+  el.textContent =
+    `The motion table below could not be filled (${why}). It needs data/summary.json to be ` +
+    `served alongside this page.`;
+}
 
 async function loadMotion() {
+  let sum;
+  try {
+    sum = await HOT3D.json('data/summary.json');
+  } catch (e) {
+    motFailed(e.message);
+    return;
+  }
+  const recs = (sum && Array.isArray(sum.recordings)) ? sum.recordings : [];
+
   const agg = new Map();
-  let read = 0, failed = 0;
-  const take = (s) => {
-    for (const o of s.objects) {
+  for (const s of recs) {
+    for (const o of (s.objects || [])) {
       let a = agg.get(o.name);
-      if (!a) agg.set(o.name, a = { name: o.name, recs: 0, travel: 0, secs: 0, frames: 0, pose: 0, seen: 0, boxed: 0, top: -1, topSeq: '' });
-      /* The payload's travel_m joins consecutive annotated samples, so a gap in the pose track is
-         crossed as one straight jump: on holder_gray (posed in 2.8% of frames) that reads eight
-         times the distance actually annotated. pathLength leaves gaps open instead. */
-      const travel = HOT3D.pathLength(HOT3D.f32(o.T, 3));
-      /* A box row exists whenever the object is inside the image; vis is the released visibility
-         ratio, and vis == 0 means in frame but fully occluded. Count only vis > 0 as visible. */
-      const box = (o.boxes && o.boxes.rgb) || null;
-      let seen = 0;
-      if (box && box.vis) { const v = HOT3D.f32(box.vis); for (let i = 0; i < v.length; i++) if (v[i] > 0) seen += 1; }
+      if (!a) agg.set(o.name, a = { name: o.name, recs: 0, travel: 0, secs: 0, frames: 0, pose: 0, boxed: 0, top: -1, topSeq: '' });
+      /* travel_m in the summary is the gap-skipping path length this page has always shown: a gap
+         in the pose track is left open, not crossed in one straight jump. The release's own figure
+         does bridge gaps — on holder_gray (posed in 2.8% of frames) it reads eight times the
+         distance actually annotated — and is kept beside it as travel_m_released, unused here. */
+      const travel = Number(o.travel_m) || 0;
       a.recs += 1;
       a.travel += travel;
       a.secs += s.duration_s;
       a.frames += s.F;
       a.pose += o.frames_with_pose;
-      a.seen += seen;
-      a.boxed += box ? (box.frames_seen || 0) : 0;
+      /* frames_boxed_rgb counts the frames carrying an RGB box: the object is inside the image,
+         occluded or not. */
+      a.boxed += o.frames_boxed_rgb || 0;
       if (travel > a.top) { a.top = travel; a.topSeq = s.seq; }
     }
-  };
-
-  /* Each payload is several MB and only a handful of scalars per object are needed here, so the
-     parsed payload is dropped as soon as it has been folded in rather than kept in the cache. */
-  const work = FEATURED.slice();
-  const worker = async () => {
-    while (work.length) {
-      const seq = work.shift();
-      try {
-        const r = await fetch(`data/seq/${seq}.json`);
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        take(await r.json());
-      } catch (e) { failed += 1; }
-      read += 1;
-      $('mstat').textContent = `reading the twelve featured payloads … ${read} of ${FEATURED.length}`;
-      drawMotion(agg, read, failed, false);
-    }
-  };
-  await Promise.all([worker(), worker()]);
-  drawMotion(agg, read, failed, true);
+  }
+  drawMotion(agg, recs.length);
 }
 
 let motTable = null, motMax = 1;
-function drawMotion(agg, read, failed, done) {
+function drawMotion(agg, nrec) {
   const rows = [...agg.values()].map((a) => ({
     name: a.name, recs: a.recs, travel: a.travel,
-    rate: a.travel / (a.secs / 60), pose: a.pose / a.frames, seen: a.seen / a.frames,
-    seenN: a.seen, boxedN: a.boxed, top: a.top, topSeq: a.topSeq,
+    rate: a.travel / (a.secs / 60), pose: a.pose / a.frames,
+    boxedN: a.boxed, top: a.top, topSeq: a.topSeq,
   }));
   if (!rows.length) {
-    if (done) {
-      $('mstat').className = 'warn-box';
-      $('mstat').textContent =
-        `None of the ${FEATURED.length} featured payloads could be read, so the table below is ` +
-        `empty. It needs data/seq/<recording>.json to be served alongside this page.`;
-    }
+    motFailed('it carries no recordings with object rows');
     return;
   }
   motMax = Math.max(...rows.map((r) => r.rate), 1e-6);
@@ -326,13 +318,11 @@ function drawMotion(agg, read, failed, done) {
     { k: 'rate', label: 'm / min', num: true, title: 'travel divided by the running time of those recordings', cell: (r) => r.rate.toFixed(2) },
     { k: 'bar', label: '', sortless: true, title: 'm / min, relative to the fastest object', cell: (r) => `<span class="bar" style="display:block"><i style="width:${(100 * r.rate / motMax).toFixed(1)}%"></i></span>` },
     { k: 'pose', label: 'frames posed', num: true, title: 'frames with an object pose, over the frames of those recordings', cell: (r) => F.pct(r.pose, 1) },
-    { k: 'seen', label: 'frames visible (RGB)', num: true, title: 'frames whose released RGB visibility ratio is above zero, over the frames of those recordings', cell: (r) => F.pct(r.seen, 1) },
     { k: 'top', label: 'busiest recording', sortless: true, cell: (r) => `<span class="mono">${F.seq(r.topSeq)}</span> <span class="note">${Math.max(r.top, 0).toFixed(1)} m</span>` },
   ];
   if (motTable) { motTable.rows.length = 0; motTable.rows.push(...rows); motTable.draw(); }
   else motTable = sortable($('motHead'), $('motBody'), cols, rows, 'rate', true);
 
-  if (!done) return;
   $('mstat').hidden = true;
   const by = rows.slice().sort((a, b) => b.rate - a.rate);
   const withRate = (r) => `${r.name} (${r.rate.toFixed(2)})`;
@@ -341,13 +331,10 @@ function drawMotion(agg, read, failed, done) {
   const still = by.filter((r) => r.rate < 1.5 && posed(r) >= 90);
   const thin = rows.slice().sort((a, b) => a.pose - b.pose).filter((r) => posed(r) < 90);
   const boxedN = rows.reduce((s, r) => s + r.boxedN, 0);
-  const seenN = rows.reduce((s, r) => s + r.seenN, 0);
   $('mnote').innerHTML =
-    `${read - failed} of ${FEATURED.length} payloads read` +
-    (failed ? `; ${failed} could not be fetched, so those recordings are missing from the table` : '') +
-    `. The release emits an RGB box in ${F.n(boxedN)} object-frames across these recordings; ` +
-    `${F.n(boxedN - seenN)} of them (${F.pct((boxedN - seenN) / boxedN, 1)}) carry a visibility ` +
-    `ratio of 0 — in the image but fully occluded — and are not counted as visible above. ` +
+    `${F.n(nrec)} recordings summarised, ${rows.length} objects between them. ` +
+    `The release emits an RGB box in ${F.n(boxedN)} object-frames across these recordings — one ` +
+    `whenever the object is inside the RGB image, whether or not anything occludes it. ` +
     `Taking 3 m/min as the line for "handled": ${handled.map(withRate).join(', ')}. ` +
     `Effectively stationary — posed in at least 90% of frames and still under 1.5 m/min: ` +
     `${still.map(withRate).join(', ')}. ` +
@@ -375,9 +362,7 @@ function drawMotion(agg, read, failed, done) {
       `table below need data/objects.json and data/index.json to be served alongside this page.`;
   }
   cardsBuilt();
-  try { await loadMotion(); } catch (e) {
-    $('mstat').textContent = `The featured payloads could not be read (${e.message}).`;
-  }
+  try { await loadMotion(); } catch (e) { motFailed(e.message); }
 })();
 
 /* If three.js never arrives, say so in the previews instead of leaving them promising a model. */
