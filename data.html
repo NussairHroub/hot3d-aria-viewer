@@ -868,7 +868,7 @@ async function headSize(path) {
       ['seq', 'objects', 'pose per frame per object, plus a 2D box and visibility per camera'],
       ['seq', 'points', `semidense scene points (${n(seq.points.shown)} × 3 float32)`],
       ['seq', 'slam', 'the headset\'s own SLAM trajectory and quality, sampled at frame times'],
-      ['seq', 'headset', 'motion-capture headset pose per frame'],
+      ['seq', 'headset', 'headset pose per frame (MPS SLAM, not mocap)'],
       ['seq', 'masks', `the ${Object.keys(seq.masks).length} non-hand quality masks × ${nStreams} streams`],
       ['seq', 'gaze', 'per-eye yaw, pitch and gaze depth'],
       ['seq', 't', 'the frame timeline in seconds'],
@@ -913,7 +913,7 @@ async function headSize(path) {
     };
     const F = seq.F;
     const avail = [
-      ['headset pose (motion capture)', seq.headset.frames],
+      ['headset pose (MPS SLAM)', seq.headset.frames],
       ['SLAM trajectory (MPS)', countFinite(seq.slam.T, 3)],
       ['SLAM pose quality score', countFinite(seq.slam.quality, 1)],
       [`eye gaze (${seq.gaze.source})`, countFinite(seq.gaze.depth, 1)],

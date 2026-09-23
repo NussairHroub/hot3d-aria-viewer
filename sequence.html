@@ -108,7 +108,7 @@
   <h2>Timeline</h2>
   <figure>
     <canvas class="chart" id="chSpeed"></canvas>
-    <figcaption id="capSpeed">Headset speed in m/s, from a central difference of the motion-capture
+    <figcaption id="capSpeed">Headset speed in m/s, from a central difference of the SLAM
     headset track. Click to seek.</figcaption>
   </figure>
   <figure style="margin-top:18px">
@@ -319,7 +319,7 @@ function buildReadout() {
        <span class="k">time</span><span class="v" data-r="time">—</span>
        <span class="k">frame</span><span class="v" data-r="frame">—</span>
      </div>
-     <h3>Headset — motion capture</h3>
+     <h3>Headset — SLAM</h3>
      <div class="kv">
        <span class="k">position x y z (m)</span><span class="v" data-r="hpos">—</span>
        <span class="k">speed</span><span class="v" data-r="hspd">—</span>
@@ -827,7 +827,7 @@ async function load(seq) {
       `— the orientation is the motion capture's.`;
     $('capSpeed').innerHTML =
       `Headset speed in m/s for <span class="mono">${seq}</span>, a central difference of the ` +
-      `motion-capture headset track at ${S.fps.toFixed(0)} fps. Click to seek.`;
+      `headset track at ${S.fps.toFixed(0)} fps. Click to seek.`;
     $('capDist').innerHTML =
       `Distance in metres from the headset origin to each object's model origin, ` +
       `<span class="mono">${seq}</span>. Gaps are frames with no released object pose. Click to seek.`;
