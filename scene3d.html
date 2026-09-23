@@ -132,6 +132,7 @@
         <tr><td>Objects</td><td class="mono">objects[].T, .Q</td><td>An oriented box with the object's <span class="mono">extent_m</span> from <span class="mono">data/objects.json</span>, centred on the model's own bounding-box centre, placed by the released pose.</td></tr>
         <tr><td>Object axes</td><td class="mono">objects[].T, .Q</td><td>The same released pose drawn as the object's own axes — X <span style="color:#e5484d">red</span>, Y <span style="color:#3fb950">green</span>, Z <span style="color:#4c8dff">blue</span> — as solid arrows, each half the object's longest side. Orientation is what a wireframe box cannot show; the axes are the model frame the release ships, so they are comparable across frames of one object, not between different objects.</td></tr>
         <tr><td>Wrists</td><td class="mono">hands.{left,right}.umetrack<br>in data/hands/&lt;seq&gt;.hands.json</td><td>A sphere at <span class="mono">wrist_t</span>, the wrist's own axes from <span class="mono">wrist_q</span> drawn as solid arrows in the same X&nbsp;<span style="color:#e5484d">red</span>, Y&nbsp;<span style="color:#3fb950">green</span>, Z&nbsp;<span style="color:#4c8dff">blue</span> convention as the objects, and a one-second trailing path. This is the one layer that comes from a second file: hand annotations carry their own licence, so they are never merged into the payload.</td></tr>
+        <tr><td>Hand joints</td><td class="mono">hands.{left,right}.umetrack<br>.landmarks</td><td>The 21 UmeTrack landmarks, skinned by the extractor from the participant's own shape profile (<span class="mono">umetrack_hand_user_profile.json</span>) and the released wrist transform and 22 joint angles. The release ships the model and the parameters, not the points. Checked by projecting every landmark into the RGB camera and testing it against the release's own 2D hand box: 100% inside on both hands.</td></tr>
         <tr><td>MPS SLAM</td><td class="mono">slam.T</td><td>A dashed line through the headset's own closed-loop trajectory, sampled at frame times.</td></tr>
       </tbody>
     </table>
@@ -187,6 +188,7 @@ const LAYERS = [
   ['objects', 'Object boxes', '--c-object'],
   ['axes',    'Object axes', '--c-object'],
   ['hands',   'Wrists', '--c-hand'],
+  ['joints',  'Hand joints', '--c-hand'],
   ['slam',    'MPS SLAM path', '--ink-2'],
 ];
 const CAM_MODES = [
@@ -611,6 +613,28 @@ async function load(seq) {
     const triad = axisTriad(0.055, false);
     ball.userData.colorVar = '--c-hand';
     node.add(ball, triad);
+    /* the 21 UmeTrack landmarks, skinned from the participant's own hand model by the extractor.
+       One instanced sphere set and one line set per hand, both rewritten per frame. */
+    const lmFlat = src.landmarks ? HOT3D.f32(src.landmarks, 3) : null;
+    const nL = src.n_landmarks || 0;
+    const edges = (hp && hp.landmark_edges) || [];
+    let joints = null, bones = null;
+    if (lmFlat && nL) {
+      joints = new THREE.InstancedMesh(
+        new THREE.SphereGeometry(0.007, 10, 8),
+        new THREE.MeshBasicMaterial({ color: col('--c-hand') }), nL);
+      joints.userData.colorVar = '--c-hand';
+      joints.frustumCulled = false;
+      const bonePos = new Float32Array(Math.max(edges.length, 1) * 6);
+      const bg = new THREE.BufferGeometry();
+      bg.setAttribute('position', new THREE.BufferAttribute(bonePos, 3));
+      bones = new THREE.LineSegments(bg, new THREE.LineBasicMaterial({ color: col('--c-hand') }));
+      bones.userData.colorVar = '--c-hand';
+      bones.frustumCulled = false;
+      bones.userData.pos = bonePos;
+      groups.joints.add(joints, bones);
+    }
+
     const trailPos = new Float32Array(TRAIL * 6);
     const tg = new THREE.BufferGeometry();
     tg.setAttribute('position', new THREE.BufferAttribute(trailPos, 3));
@@ -619,7 +643,8 @@ async function load(seq) {
     trail.userData.colorVar = '--c-hand';
     groups.hands.add(node, trail);
     hands.push({
-      side, node, trail, trailPos,
+      side, node, trail, trailPos, joints, bones, lmFlat, nL, edges,
+      lmMat: new THREE.Matrix4(), lmVec: new THREE.Vector3(),
       T: HOT3D.f32(src.wrist_t, 3), Q: HOT3D.f32(src.wrist_q, 4),
       frames: src.frames, boxVis: HOT3D.f32(hp.hands[side].boxes.rgb.vis),
     });
@@ -715,6 +740,33 @@ function setFrame(i, force) {
     } else o.here = false;
   }
   for (const h of hands) {
+    if (h.joints) {
+      const base = i * h.nL;
+      let any = false;
+      for (let j = 0; j < h.nL; j++) {
+        const p = h.lmFlat[base + j];
+        const ok = p && isFinite(p[0]);
+        any = any || ok;
+        // a landmark with no pose is parked at the origin and scaled to nothing, which is the
+        // only way to hide one instance of an InstancedMesh
+        h.lmMat.makeScale(ok ? 1 : 0, ok ? 1 : 0, ok ? 1 : 0);
+        if (ok) h.lmMat.setPosition(p[0], p[1], p[2]);
+        h.joints.setMatrixAt(j, h.lmMat);
+      }
+      h.joints.instanceMatrix.needsUpdate = true;
+      h.joints.visible = any;
+      const bp = h.bones.userData.pos;
+      for (let e = 0; e < h.edges.length; e++) {
+        const a = h.lmFlat[base + h.edges[e][0]], b = h.lmFlat[base + h.edges[e][1]];
+        const good = a && b && isFinite(a[0]) && isFinite(b[0]);
+        for (let c = 0; c < 3; c++) {
+          bp[e * 6 + c] = good ? a[c] : 0;
+          bp[e * 6 + 3 + c] = good ? b[c] : 0;
+        }
+      }
+      h.bones.geometry.attributes.position.needsUpdate = true;
+      h.bones.visible = any;
+    }
     h.here = setPose(h.node, h.T, h.Q, i);
     let m = 0;
     for (let k = Math.max(1, i - TRAIL + 1); k <= i; k++) {

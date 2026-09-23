@@ -93,6 +93,7 @@
         <label class="toggle"><input type="checkbox" id="tObj" checked><span class="swatch" style="background:var(--c-object)"></span>Object boxes</label>
         <label class="toggle"><input type="checkbox" id="tHand" checked><span class="swatch" style="background:var(--c-hand)"></span>Hand boxes</label>
         <label class="toggle"><input type="checkbox" id="tAxes"><span class="swatch" style="background:linear-gradient(90deg,#e5484d 33%,#3fb950 33% 66%,#4c8dff 66%)"></span>Object axes</label>
+      <label class="toggle"><input type="checkbox" id="tJoints" checked><span class="swatch" style="background:var(--c-hand)"></span>Hand joints</label>
       <label class="toggle"><input type="checkbox" id="tHAxes"><span class="swatch" style="background:linear-gradient(90deg,#e5484d 33%,#3fb950 33% 66%,#4c8dff 66%)"></span>Hand axes</label>
       <label class="toggle"><input type="checkbox" id="tQa" checked>QA badge</label>
       </div>
@@ -153,6 +154,7 @@ const sel = $('seqSel'), statusEl = $('status'), pills = $('pills');
 const stage = $('stage'), vid = $('vid'), ov = $('ov'), octx = ov.getContext('2d');
 const playBtn = $('playBtn'), scrub = $('scrub'), tRead = $('tRead');
 const tObj = $('tObj'), tHand = $('tHand'), tQa = $('tQa'), tAxes = $('tAxes'), tHAxes = $('tHAxes');
+const tJoints = $('tJoints');
 const objToggles = $('objToggles'), readout = $('readout'), legend = $('distLegend');
 const chSpeed = $('chSpeed'), chDist = $('chDist');
 const CAP0 = { cap: $('cap').innerHTML, capSpeed: $('capSpeed').innerHTML, capDist: $('capDist').innerHTML };
@@ -255,6 +257,7 @@ function decode(d, hd) {
       pitch: HOT3D.f32(d.gaze.pitch), depth: HOT3D.f32(d.gaze.depth),
     },
     masks: {}, objects: [], hands: {},
+    edges: hd.landmark_edges || [],
   };
   // the five sequence masks, then the two hand masks out of the hand file: one readout, two files
   for (const key of Object.keys(d.masks)) st.masks[key] = HOT3D.u8(d.masks[key].rgb);
@@ -278,6 +281,10 @@ function decode(d, hd) {
       side,
       ume: { t: HOT3D.f32(h.umetrack.wrist_t, 3), q: HOT3D.f32(h.umetrack.wrist_q, 4),
              conf: HOT3D.f32(h.umetrack.conf) },
+      // the 21 UmeTrack landmarks, skinned from the participant's own hand model: rows are
+      // frame-major, so landmark j of frame i is row i * nL + j
+      lm: h.umetrack.landmarks ? HOT3D.f32(h.umetrack.landmarks, 3) : null,
+      nL: h.umetrack.n_landmarks || 0,
       box: HOT3D.f32(h.boxes.rgb.xyxy, 4), vis: HOT3D.f32(h.boxes.rgb.vis),
     };
   }
@@ -513,6 +520,38 @@ function poseAxes(T, Q, L, i, s) {
   octx.restore();
 }
 
+/* The 21 landmarks, projected the same way the axes are. They are skinned from the release's own
+   per-participant hand model, not detected in the image — the check that they are right is that
+   every one of them lands inside the release's own 2D hand box (100% on both hands, sampled). */
+function drawJoints(h, i, s) {
+  if (!S.proj || !h.lm || !h.nL) return;
+  const base = i * h.nL;
+  const pts = new Array(h.nL);
+  for (let j = 0; j < h.nL; j++) {
+    const p = h.lm[base + j];
+    pts[j] = (p && isFinite(p[0])) ? S.proj.world(p, S.hT[i], S.hQ[i]) : null;
+  }
+  octx.save();
+  octx.lineCap = 'round';
+  for (const [a, b] of S.edges) {                      // bones, cased in dark for bright video
+    const p = pts[a], q = pts[b];
+    if (!p || !q) continue;
+    octx.strokeStyle = 'rgba(0,0,0,.5)'; octx.lineWidth = 4.5;
+    octx.beginPath(); octx.moveTo(p[0] * s, p[1] * s); octx.lineTo(q[0] * s, q[1] * s); octx.stroke();
+    octx.strokeStyle = PAL.hand; octx.lineWidth = 2;
+    octx.beginPath(); octx.moveTo(p[0] * s, p[1] * s); octx.lineTo(q[0] * s, q[1] * s); octx.stroke();
+  }
+  for (let j = 0; j < pts.length; j++) {
+    const p = pts[j];
+    if (!p) continue;
+    octx.beginPath(); octx.arc(p[0] * s, p[1] * s, j === 0 ? 4 : 2.8, 0, 6.2832);
+    octx.fillStyle = j === 0 ? '#fff' : PAL.hand;      // the wrist root reads as the root
+    octx.strokeStyle = 'rgba(0,0,0,.6)'; octx.lineWidth = 1.5;
+    octx.fill(); octx.stroke();
+  }
+  octx.restore();
+}
+
 function drawOverlay(i) {
   if (!S || !cw) return;
   octx.clearRect(0, 0, cw, ch);
@@ -536,6 +575,9 @@ function drawOverlay(i) {
   }
   if (tAxes.checked) {
     for (const o of S.objects) if (o.on) drawAxes(o, i, s);
+  }
+  if (tJoints.checked) {
+    for (const side of ['left', 'right']) drawJoints(S.hands[side], i, s);
   }
   if (tHAxes.checked) {
     for (const side of ['left', 'right']) drawHandAxes(S.hands[side], i, s);
@@ -816,7 +858,7 @@ addEventListener('hashchange', () => {
 
 /* The overlay toggles only took effect on the next frame the video happened to draw, so
    flipping one while paused looked like it did nothing. Redraw on the spot. */
-for (const t of [tObj, tHand, tQa, tAxes, tHAxes]) {
+for (const t of [tObj, tHand, tQa, tAxes, tHAxes, tJoints]) {
   t.addEventListener('change', () => drawOverlay(cur));
 }
 

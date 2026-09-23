@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Hands · HOT3D Aria</title>
-<meta name="description" content="What the HOT3D release ships for a hand: UmeTrack wrist poses, joint angles and 2D boxes, how often each hand is annotated, and why the MANO parameters are not republished here.">
+<meta name="description" content="What the HOT3D release ships for a hand: UmeTrack wrist poses, joint angles and 2D boxes, how often each hand is annotated, the 21 landmarks skinned from them, and why the MANO parameters are not republished here.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -94,11 +94,19 @@
     </div>
   </div>
 
-  <div class="warn-box" style="margin-top:14px">
-    <p style="margin:0">This file carries the <strong>wrist pose and the model parameters</strong>,
-    not expanded finger landmarks. Turning the <span id="nU2">22</span> angles into 3D fingertips
-    needs the UmeTrack hand model and the per-participant hand shape, neither of which is included
-    here. Nothing on this page should be read as a finger-joint position.</p>
+  <div class="card" style="margin-top:14px">
+    <p style="margin:0">The release stores a hand as a <strong>model, not as points</strong>: a
+    per-participant shape profile (<span class="mono">umetrack_hand_user_profile.json</span>, which
+    holds 21 landmark rest positions and their bone weights) plus, per frame, a wrist transform and
+    <span id="nU2">22</span> joint angles. The hand file here carries all of those, and also the
+    <strong>21 landmarks</strong> skinned from them — the forward-kinematics step the release
+    leaves to the reader. They are drawn on the
+    <a href="sequence.html">sequence viewer</a> and in the <a href="scene3d.html">3D scene</a>.</p>
+    <p class="note" style="margin:8px 0 0">Two things worth knowing about that step. The release
+    ships one shape profile per recording; skinned as shipped it fits the left hand exactly and the
+    right hand not at all, so the model is mirrored through x for the right hand, with the rotation
+    axes reflected and negated. And the check that any of this is right is the release's own 2D
+    hand boxes: every projected landmark falls inside its hand's released box, on both hands.</p>
   </div>
 
   <h2>Per-recording availability</h2>

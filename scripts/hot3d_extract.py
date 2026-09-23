@@ -36,6 +36,13 @@ HAND_MASKS = ("hand_visible", "hand_pose_available")
 # monochrome SLAM cameras' boxes are two thirds of that payload's bytes and no page draws them,
 # so they are published beside it instead of inside it.
 MAIN_BOX_STREAM = "rgb"
+# UmeTrack's 21 landmarks: a wrist root and four points per finger, thumb first. The edges are
+# checked against the skinned rest pose before use, not assumed.
+LANDMARK_EDGES = [[0, 1], [1, 2], [2, 3], [3, 4],
+                  [0, 5], [5, 6], [6, 7], [7, 8],
+                  [0, 9], [9, 10], [10, 11], [11, 12],
+                  [0, 13], [13, 14], [14, 15], [15, 16],
+                  [0, 17], [17, 18], [18, 19], [19, 20]]
 LIC_SEQUENCE = ("HOT3D sequence data and non-hand annotations, (c) Meta Platforms Technologies, "
                 "LLC, CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/); modified: "
                 "resampled onto the RGB frame grid, boxes rotated to the upright frame, points "
@@ -136,6 +143,86 @@ def boxes_on_timeline(cols, timeline, stream, key, value, sensor_hw=None):
     box[idx[ok]] = xyxy[ok]
     vis[idx[ok]] = cols["visibility_ratio[%]"][sel][ok]
     return box, vis
+
+
+def umetrack_landmarks(seq_dir, timeline, wrist_t, wrist_q, angles, side):
+    """The 21 UmeTrack landmarks per frame, skinned from the participant's own hand model.
+
+    The release stores hands as a model, not as points: a per-participant shape profile
+    (umetrack_hand_user_profile.json, with 21 landmark rest positions and their bone weights) plus
+    a wrist transform and 22 joint angles per frame. The landmarks are one forward-kinematics step
+    away -- this is that step, and it is why the release ships no landmark array of its own.
+
+    Returns (F, 21, 3) in world coordinates, or None when the toolkit is not installed.
+    """
+    try:
+        import torch
+        from hand_tracking_toolkit.hand_models.umetrack_hand_model import from_json, skin_landmarks
+    except Exception:
+        return None
+    prof_path = os.path.join(seq_dir, "umetrack_hand_user_profile.json")
+    if not os.path.exists(prof_path):
+        return None
+    prof = json.load(open(prof_path))
+    prof = prof["hand_model"] if "hand_model" in prof else prof
+
+    # The release ships ONE shape profile per recording, and the toolkit does no mirroring. Skinned
+    # as shipped it fits hand 0 (left) exactly and hand 1 (right) not at all. Mirroring the model
+    # through x -- rest positions reflected, rotation axes reflected and negated so the released
+    # joint angles keep their sign -- fits the right hand exactly. Established by projecting the
+    # skinned landmarks into the RGB camera and testing them against the release's own 2D hand
+    # boxes: as shipped 11.7% of right-hand landmarks land inside, mirrored 100.0% (1260/1260
+    # samples), while the other five candidate mirrors score between 4.8% and 13.2%.
+    if side == "right":
+        prof = dict(prof)
+        M = np.diag([-1.0, 1.0, 1.0])
+        for key in ("joint_rest_positions", "landmark_rest_positions"):
+            prof[key] = (np.asarray(prof[key], dtype=np.float64) @ M.T).tolist()
+        prof["joint_rotation_axes"] = (
+            -(np.asarray(prof["joint_rotation_axes"], dtype=np.float64) @ M.T)).tolist()
+    model = from_json(prof)
+
+    F = len(timeline)
+    out = np.full((F, 21, 3), np.nan)
+    ok = np.isfinite(wrist_t).all(1) & np.isfinite(wrist_q).all(1) & np.isfinite(angles).all(1)
+    idx = np.nonzero(ok)[0]
+    if idx.size == 0:
+        return out
+
+    # wrist_xform is T_world_from_wrist as a 4x4, the form the toolkit expects
+    n = idx.size
+    xf = np.zeros((n, 4, 4))
+    xf[:, 3, 3] = 1.0
+    w, x, y, z = (wrist_q[idx, 0], wrist_q[idx, 1], wrist_q[idx, 2], wrist_q[idx, 3])
+    xf[:, 0, 0] = 1 - 2 * (y * y + z * z); xf[:, 0, 1] = 2 * (x * y - z * w); xf[:, 0, 2] = 2 * (x * z + y * w)
+    xf[:, 1, 0] = 2 * (x * y + z * w); xf[:, 1, 1] = 1 - 2 * (x * x + z * z); xf[:, 1, 2] = 2 * (y * z - x * w)
+    xf[:, 2, 0] = 2 * (x * z - y * w); xf[:, 2, 1] = 2 * (y * z + x * w); xf[:, 2, 2] = 1 - 2 * (x * x + y * y)
+    xf[:, :3, 3] = wrist_t[idx]
+
+    # the toolkit skins a batch of poses against a batch of models, so the one shape profile is
+    # expanded to match the poses; chunked to keep the expanded tensors small
+    import dataclasses
+    PER_POSE = ("joint_rest_positions", "joint_rotation_axes", "landmark_rest_positions",
+                "landmark_rest_bone_weights", "landmark_rest_bone_indices")
+
+    def batched(m, k):
+        vals = {}
+        for f in dataclasses.fields(m):
+            v = getattr(m, f.name)
+            vals[f.name] = (v.unsqueeze(0).expand(k, *v.shape).contiguous()
+                            if (torch.is_tensor(v) and f.name in PER_POSE) else v)
+        return type(m)(**vals)
+
+    CHUNK = 512
+    with torch.no_grad():
+        for a in range(0, n, CHUNK):
+            sl = slice(a, min(a + CHUNK, n))
+            k = idx[sl].size
+            lm = skin_landmarks(batched(model, k),
+                                torch.tensor(angles[idx[sl]], dtype=torch.float32),
+                                torch.tensor(xf[sl], dtype=torch.float32))
+            out[idx[sl]] = lm.reshape(k, -1, 3).numpy()
+    return out
 
 
 def read_hand_jsonl(path, timeline, key):
@@ -385,6 +472,7 @@ def main(seq_dir, out_path):
                            timeline, "pose")
 
     hands = {}
+    landmark_stats = {}
     for h, side in (("0", "left"), ("1", "right")):
         rec = {"side": side}
         for src, data in (("umetrack", ume), ("mano", mano)):
@@ -395,6 +483,13 @@ def main(seq_dir, out_path):
             if d["params"] is not None:
                 rec[src]["params"] = b64(d["params"])
                 rec[src]["n_params"] = int(d["params"].shape[1])
+        lm = umetrack_landmarks(seq_dir, timeline, ume[h]["wrist_t"], ume[h]["wrist_q"],
+                                ume[h]["params"], side) if ume[h]["params"] is not None else None
+        if lm is not None:
+            rec["umetrack"]["landmarks"] = b64(lm)
+            rec["umetrack"]["n_landmarks"] = int(lm.shape[1])
+            landmark_stats[side] = int(np.isfinite(lm).all((1, 2)).sum())
+
         rec["boxes"] = {}
         for sid, label in STREAMS.items():
             box, vis = boxes_on_timeline(box_hand, timeline, sid, "hand_index", str(h),
@@ -459,6 +554,7 @@ def main(seq_dir, out_path):
     hands_payload = {
         "v": 2, "dataset": "HOT3D", "license": LIC_HANDS, "seq": seq, "F": F,
         "participant": meta.get("participant_id"),
+        "landmark_edges": LANDMARK_EDGES,
         "hands": {side: {k: v for k, v in rec.items() if k != "mano"}
                   for side, rec in hands.items()},
         "masks": {k: {s: b64(v, "|u1") for s, v in d.items()}
@@ -467,7 +563,9 @@ def main(seq_dir, out_path):
         "summary": {"frames": F,
                     "hand_frames": {s: hands[s]["umetrack"]["frames"] for s in hands},
                     "mano_frames": {s: hands[s]["mano"]["frames"] for s in hands},
-                    "mano_included": False},
+                    "mano_included": False,
+                    "landmark_frames": landmark_stats or None,
+                    "landmarks_included": bool(landmark_stats)},
     }
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
