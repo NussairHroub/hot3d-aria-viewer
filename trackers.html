@@ -1,0 +1,1086 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hand trackers · HOT3D Aria</title>
+<meta name="description" content="MediaPipe, WiLoR and HaMeR scored against HOT3D's motion-capture hands: detection rate, 2D pixel error by distance and landmark, handedness, false positives and the caveats behind each number.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+<style>
+  /* Series colours from the site's channel tokens, not a new palette; --c-hand keeps meaning
+     "the ground-truth hand", as elsewhere. */
+  .t-mediapipe { color: var(--c-object); }
+  .t-wilor     { color: var(--c-headset); }
+  .t-hamer     { color: var(--c-gaze); }
+  .sw { width: 11px; height: 11px; border-radius: 3px; display: inline-block;
+        background: currentColor; border: 1px solid var(--line-2); vertical-align: -1px; }
+  .lg { display: flex; gap: 16px; flex-wrap: wrap; align-items: center;
+        font-size: 12.5px; color: var(--muted); margin: 0 0 8px; }
+  .lg span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .lg i { width: 22px; border-top: 2px solid currentColor; display: inline-block; }
+  .chart { width: 100%; height: 210px; }
+  .panel { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
+  .ctl { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 0 0 12px; }
+  .ctl .lab { font-size: 12px; color: var(--muted); font-family: var(--mono); }
+  table.cmp th:first-child, table.cmp td:first-child { white-space: normal; min-width: 158px; }
+  table.cmp tr.sep td, table.cmp tr.sep th { border-top: 1px solid var(--line-2); }
+  table.cmp td.best { font-weight: 600; }
+  th .arw { font-size: 9px; }
+  /* site.css styles :focus-visible for a/button/input only; these th are tabbable */
+  th[data-k]:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+  th.sorted { color: var(--ink); }
+  .bars { display: grid; gap: 9px; margin: 4px 0 0; }
+  .barrow { display: grid; grid-template-columns: 132px 1fr; gap: 10px; align-items: center; }
+  .barrow .lab { font-family: var(--mono); font-size: 11px; color: var(--ink-2);
+                 overflow: hidden; text-overflow: ellipsis; }
+  .barrow.hi .lab { color: var(--warn); }
+  .barset { display: grid; gap: 2px; }
+  .bar { height: 8px; border-radius: 2px; background: var(--surface-2);
+         box-shadow: inset 0 0 0 1px var(--line); position: relative; }
+  .bar b { display: block; height: 100%; border-radius: 2px; background: currentColor; font-size: 0; }
+  .bar u { position: absolute; right: 4px; top: -3px; font: 10px/14px var(--mono);
+           color: var(--muted); text-decoration: none; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; font-size: 13.5px; margin: 10px 0 0; }
+  .kv dt { color: var(--muted); font-family: var(--mono); font-size: 11.5px; }
+  .kv dd { margin: 0; }
+  /* paths and field names in prose overflow a 380 px column */
+  .meta .mono, .note .mono, p .mono { overflow-wrap: anywhere; }
+  .caveats { display: grid; gap: 12px; }
+  .caveat { border-left: 3px solid var(--line-2); padding: 2px 0 2px 14px; }
+  .caveat h3 { margin: 0 0 4px; }
+  .caveat p { margin: 0; color: var(--ink-2); font-size: 14px; }
+  /* two-row headers: the shared sticky th would overlap itself */
+  table.hh thead th { position: static; }
+  table.hh thead tr.sub th { text-transform: none; letter-spacing: 0; font-weight: 400;
+                             color: var(--muted); font-size: 12px; }
+  .headroom { margin-top: 26px; }
+  @media (max-width: 560px) {
+    .barrow { grid-template-columns: 104px 1fr; }
+    .panel { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div class="page-head">
+    <p class="eyebrow">Hand-tracker accuracy</p>
+    <h1>Three off-the-shelf hand trackers, measured against mocap</h1>
+    <p class="lede">HOT3D annotates hands with motion capture, not a model's guess, so this is an
+    accuracy question rather than an agreement question: run MediaPipe Hands, WiLoR and HaMeR over
+    the Aria RGB frames, project the released ground-truth hands into the same image, measure the
+    gap in pixels. This page reports that measurement, the breakdowns that change how it reads, and
+    where the number is not what it looks like.</p>
+  </div>
+
+  <section class="figs" aria-label="Evaluation at a glance">
+    <div class="fig"><div class="n" id="fFrames">—</div><div class="k">frames scored</div></div>
+    <div class="fig"><div class="n" id="fHands">—</div><div class="k">evaluable ground-truth hands</div></div>
+    <div class="fig"><div class="n" id="fRecs">—</div><div class="k">annotated Aria recordings</div></div>
+    <div class="fig"><div class="n" id="fDiag">—</div><div class="k">median GT hand box diagonal, px</div></div>
+  </section>
+  <p class="loading" id="status">Loading results…</p>
+
+  <h2>The comparison</h2>
+  <p id="cmpProse">Detection rate and error have to be read together: a tracker is not scored on
+  the hard hands it skipped, so a low detection rate flatters the error column. Every error below
+  is over matched hands only.</p>
+  <div class="ctl">
+    <span class="lab">Hand assignment</span>
+    <span class="toggles" role="group" aria-label="Which assignment the table uses">
+      <button class="btn" type="button" id="mLabel" aria-pressed="true">Tracker's own labels</button>
+      <button class="btn" type="button" id="mGeom" aria-pressed="false">Geometric oracle</button>
+    </span>
+  </div>
+  <div class="table-wrap">
+    <table class="cmp" id="cmpTbl">
+      <thead><tr id="cmpHead"><th scope="col" class="no-sort">Metric</th><th scope="col" class="no-sort num">—</th><th scope="col" class="no-sort num">—</th><th scope="col" class="no-sort num">—</th></tr></thead>
+      <tbody id="cmpBody"><tr><td colspan="4" class="loading">waiting for the results files…</td></tr></tbody>
+    </table>
+  </div>
+  <p class="note" id="cmpNote">Caption loads with the data.</p>
+
+  <div class="card headroom" id="scaleCard">
+    <h3>What a pixel is worth here</h3>
+    <p style="margin:0" id="scaleProse">Scale note loads with the data.</p>
+  </div>
+
+  <h2>Accuracy and coverage in one curve</h2>
+  <p>A single mean hides the trade. The curve sweeps a pixel tolerance and asks what share of
+  scored landmarks lands inside it. Against <em>all</em> evaluable hands a miss fails at every
+  tolerance and the curve tops out at the detection rate; against matched hands only it is
+  conventional PCK, which says nothing about what the tracker skipped.</p>
+  <div class="ctl">
+    <span class="lab">Denominator</span>
+    <span class="toggles" role="group" aria-label="Which denominator the curve uses">
+      <button class="btn" type="button" id="dAll" aria-pressed="true">All evaluable GT hands</button>
+      <button class="btn" type="button" id="dMatched" aria-pressed="false">Matched hands only</button>
+    </span>
+  </div>
+  <figure>
+    <div class="lg" id="lgCurve"></div>
+    <canvas class="chart" id="cCurve" role="img" aria-label="Line chart, one line per tracker: share of scored landmarks within a tolerance of 0 to 100 px. Values at 20 px are in the caption."></canvas>
+    <figcaption id="capCurve">Curve loads with the data.</figcaption>
+  </figure>
+
+  <h2>Distance from the camera</h2>
+  <p id="distProse">Hands are binned by distance from the RGB camera centre to the ground-truth
+  wrist. Distance sets apparent size, so it moves detection and error in opposite directions: a
+  near hand is large and easy to find but its error is measured on a large hand; a far hand is
+  small, easily missed, and cheap in pixels when found.</p>
+  <div class="panel">
+    <figure>
+      <canvas class="chart" id="cDistDet" role="img"
+              aria-label="Bar chart: detection rate per distance bin per tracker; same numbers as the table below."></canvas>
+      <figcaption id="capDistDet">Detection rate by distance.</figcaption>
+    </figure>
+    <figure>
+      <canvas class="chart" id="cDistErr" role="img"
+              aria-label="Bar chart: median landmark error in px per distance bin per tracker; same numbers as the table below."></canvas>
+      <figcaption id="capDistErr">Error by distance.</figcaption>
+    </figure>
+  </div>
+  <div class="table-wrap headroom">
+    <table class="hh" id="distTbl">
+      <thead><tr id="distHead"></tr><tr class="sub" id="distSub"></tr></thead>
+      <tbody id="distBody"><tr><td colspan="11" class="loading">waiting…</td></tr></tbody>
+    </table>
+  </div>
+  <p class="note" id="distNote"></p>
+
+  <h2>What the ground truth is</h2>
+  <div class="cards">
+    <div class="card">
+      <h3>A measurement, not a prediction</h3>
+      <div class="meta">HOT3D's hands come from a motion-capture rig. The release stores each hand
+      as a wrist transform plus joint angles, skinned through the <strong>participant's own UmeTrack
+      shape profile</strong> into 21 landmarks and projected into the RGB camera with the released
+      <span class="mono">FISHEYE624</span> calibration and the MPS headset trajectory. Nothing in
+      that chain is a hand model looking at the picture, which is what makes this an accuracy
+      measurement rather than a disagreement measurement.</div>
+      <dl class="kv" id="kvGt"></dl>
+    </div>
+    <div class="card">
+      <h3>Still a fit, not a truth</h3>
+      <div class="meta">Mocap gives marker positions; the landmarks are a hand model fitted to
+      them, and the projection adds the calibration's error and the trajectory's. HOT3D publishes no
+      per-frame accuracy figure for its hand annotation, so the floor of this measurement is
+      unknown: these numbers are upper bounds on tracker error, and small differences between
+      trackers are smaller than they look. The one check that exists is geometric — the scorer's
+      projection and rotation land inside the release's own 2D hand boxes on 99.99% of 73,349.</div>
+    </div>
+  </div>
+  <p class="note" id="gtNote"></p>
+
+  <h2>The evaluation set</h2>
+  <p id="setProse">Set description loads with the data.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th scope="col" class="no-sort">Gate</th><th scope="col" class="no-sort">Condition</th></tr></thead>
+      <tbody id="gateBody"><tr><td colspan="2" class="loading">waiting…</td></tr></tbody>
+    </table>
+  </div>
+  <p class="note" id="setNote"></p>
+
+  <h2>Hand side, and hands annotated but not visible</h2>
+  <p id="subProse">The release annotates a hand in 3D whenever the mocap solve has it, including
+  frames where it is occluded or outside the RGB cone, so visibility is a breakdown axis, not part
+  of the gate.</p>
+  <div class="table-wrap">
+    <table class="hh" id="subTbl">
+      <thead><tr id="subHead"></tr><tr class="sub" id="subSub"></tr></thead>
+      <tbody id="subBody"><tr><td colspan="8" class="loading">waiting…</td></tr></tbody>
+    </table>
+  </div>
+  <p class="note" id="subNote"></p>
+
+  <h2>Per landmark</h2>
+  <p id="lmProse">Mean 2D error for each of the 20 scored landmarks. Read the wrist row first; the
+  reason is the first caveat below.</p>
+  <div class="lg" id="lgLm"></div>
+  <div class="bars" id="lmBars"><p class="loading">waiting…</p></div>
+  <p class="note" id="lmNote"></p>
+
+  <h2>Handedness</h2>
+  <p id="hProse">An image-space detector labels hands as they appear in the picture, and in an
+  egocentric view the wearer's hands enter from the bottom of the frame and cross, so the label is
+  not free. Each tracker was scored three ways: labels at face value (<em>identity</em>),
+  labels flipped (<em>swapped</em>), and labels ignored in favour of the cheapest one-to-one pairing
+  (<em>geometric</em>). The gap between the best label-based run and the geometric one is the price
+  of the tracker's left/right confusion.</p>
+  <div class="table-wrap">
+    <table id="handTbl">
+      <thead><tr id="handHead"></tr></thead>
+      <tbody id="handBody"><tr><td colspan="8" class="loading">waiting…</td></tr></tbody>
+    </table>
+  </div>
+  <div class="warn-box headroom" id="handCall"><p style="margin:0">Loading…</p></div>
+
+  <h2>False positives</h2>
+  <p id="fpProse">Detection rate counts ground-truth hands that got a detection and says nothing
+  about detections that got no hand. Two counts matter: detections left unassigned after matching,
+  and detections on frames where the release annotates no hand.</p>
+  <div class="table-wrap">
+    <table id="fpTbl">
+      <thead><tr id="fpHead"></tr></thead>
+      <tbody id="fpBody"><tr><td colspan="4" class="loading">waiting…</td></tr></tbody>
+    </table>
+  </div>
+  <p class="note" id="fpNote"></p>
+
+  <h2>Per recording</h2>
+  <p class="note">Click a column header to sort, again to reverse. One row per recording.</p>
+  <div class="table-wrap">
+    <table id="recTbl">
+      <thead><tr id="recHead"></tr></thead>
+      <tbody id="recBody"><tr><td colspan="10" class="loading">waiting…</td></tr></tbody>
+    </table>
+  </div>
+  <p class="note" id="recNote"></p>
+
+  <h2>Caveats</h2>
+  <div class="caveats">
+    <div class="caveat">
+      <h3>The wrist is unfair to every tracker</h3>
+      <p id="cavWrist">Loading…</p>
+    </div>
+    <div class="caveat">
+      <h3>HaMeR's detection rate is partly its detector's</h3>
+      <p>HaMeR is a hand-pose model, not a hand detector: it needs boxes, so its detection rate
+      here is really its box front-end's. The boxes came from ViTPose-H wholebody hand keypoints
+      with a YOLOv8s person detector and a full-image fallback — not the ViTDet/detectron2
+      front-end of HaMeR's published demo. Another front-end would move the detection rate, the
+      false-positive counts and, through which hands get scored at all, the error. MediaPipe and
+      WiLoR carry their own detectors and ran end to end, so only their numbers are model numbers.
+      The front-end is in each HaMeR prediction npz (<span class="mono">opts_json</span>), not in
+      the results file this page reads.</p>
+    </div>
+    <div class="caveat">
+      <h3>Errors are 2D, in pixels</h3>
+      <p id="cav2d">Loading…</p>
+    </div>
+  </div>
+
+  <h2>Where the numbers came from</h2>
+  <p id="provProse">Provenance loads with the data.</p>
+  <div class="cards">
+    <div class="card">
+      <h3>Frames</h3>
+      <div class="meta" id="provFrames">—</div>
+    </div>
+    <div class="card">
+      <h3>Scoring</h3>
+      <div class="meta" id="provScore">—</div>
+    </div>
+    <div class="card">
+      <h3>Runs</h3>
+      <div class="meta" id="provRuns">—</div>
+    </div>
+  </div>
+  <p class="note headroom" id="provVer"></p>
+  <p class="note">The results files and their schema are in
+  <span class="mono">data/trackers/</span>; every figure here is read from them in the browser.</p>
+</main>
+
+<script>
+HOT3D.init();
+
+(function () {
+const $ = (id) => document.getElementById(id);
+const f = HOT3D.fmt;
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/* Tracker order is the order the runs were added; `cls` picks the series colour. */
+const TRACKERS = [
+  { key: 'mediapipe', label: 'MediaPipe', cls: 't-mediapipe', tok: '--c-object' },
+  { key: 'wilor',     label: 'WiLoR',     cls: 't-wilor',     tok: '--c-headset' },
+  { key: 'hamer',     label: 'HaMeR',     cls: 't-hamer',     tok: '--c-gaze' },
+];
+const D = {};                 // key -> parsed results JSON
+const S = { mapping: 'label', denom: 'all', loaded: false };
+
+const colour = (t) => HOT3D.css(t.tok);
+const num = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '—');
+const px = (v, d = 2) => (Number.isFinite(v) ? `${v.toFixed(d)}` : '—');
+
+/* ---------- loading ----------
+   The files carry bare NaN literals for the one recording with no scorable frames — valid Python,
+   invalid JSON — so JSON.parse (and HOT3D.json) throws on the whole file. Repaired here rather
+   than in the data: only NaN in a value position becomes null, which every reader below already
+   treats as missing. Worth fixing at the source. */
+async function loadResults(path) {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
+  const txt = await res.text();
+  return JSON.parse(txt.replace(/([:[,]\s*)NaN\b/g, '$1null'));
+}
+
+/* the block a tracker contributes to the comparison table, under the assignment toggle */
+const block = (k) => (S.mapping === 'geom' ? D[k].by_mapping_geometric : D[k].overall);
+
+/* ---------- generic drawing ---------- */
+
+const mono = () => HOT3D.css('--mono') || 'monospace';
+
+function fitCanvas(cv, fallbackH) {
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const w = cv.clientWidth || 560, h = cv.clientHeight || fallbackH || 200;
+  cv.width = Math.max(1, Math.round(w * dpr));
+  cv.height = Math.max(1, Math.round(h * dpr));
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  return { ctx, w, h };
+}
+
+/* A line chart on an arbitrary numeric x axis; HOT3D.linePlot labels x in seconds, wrong for a
+   pixel-tolerance sweep. */
+function xyPlot(cv, xs, series, opts) {
+  const o = opts || {};
+  const { ctx, w, h } = fitCanvas(cv, 210);
+  const padL = o.padL || 46, padR = 10, padT = 10, padB = 30;
+  const x0 = xs[0], x1 = xs[xs.length - 1];
+  const lo = o.min != null ? o.min : 0;
+  let hi = o.max;
+  if (hi == null) {
+    hi = -Infinity;
+    for (const s of series) for (const v of s.v) if (Number.isFinite(v)) hi = Math.max(hi, v);
+    if (!Number.isFinite(hi) || hi <= lo) hi = lo + 1;
+    hi += (hi - lo) * 0.06;
+  }
+  const X = (v) => padL + (w - padL - padR) * (v - x0) / Math.max(x1 - x0, 1e-9);
+  const Y = (v) => h - padB - (h - padT - padB) * (v - lo) / Math.max(hi - lo, 1e-9);
+  ctx.font = `11px ${mono()}`;
+  ctx.lineWidth = 1;
+  for (let g = 0; g <= 4; g++) {
+    const v = lo + (hi - lo) * g / 4, yy = Math.round(Y(v)) + 0.5;
+    ctx.strokeStyle = HOT3D.css('--line'); ctx.globalAlpha = 0.7;
+    ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(w - padR, yy); ctx.stroke();
+    ctx.globalAlpha = 1; ctx.fillStyle = HOT3D.css('--muted');
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ctx.fillText(o.fmtY ? o.fmtY(v) : v.toFixed(0), padL - 6, yy);
+  }
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  for (let g = 0; g <= 4; g++) {
+    const v = x0 + (x1 - x0) * g / 4;
+    ctx.fillText(o.fmtX ? o.fmtX(v) : v.toFixed(0), X(v), h - padB + 5);
+  }
+  if (o.xLabel) {
+    ctx.textAlign = 'right'; ctx.fillText(o.xLabel, w - padR, h - padB + 16);
+  }
+  for (const s of series) {
+    ctx.strokeStyle = s.color; ctx.lineWidth = s.width || 1.7;
+    ctx.setLineDash(s.dash || []);
+    ctx.beginPath();
+    let pen = false;
+    for (let i = 0; i < s.v.length; i++) {
+      const v = s.v[i];
+      if (!Number.isFinite(v)) { pen = false; continue; }
+      if (!pen) { ctx.moveTo(X(xs[i]), Y(v)); pen = true; } else ctx.lineTo(X(xs[i]), Y(v));
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
+/* Grouped bars: one group per category, one bar per tracker. */
+function barPlot(cv, cats, series, opts) {
+  const o = opts || {};
+  const { ctx, w, h } = fitCanvas(cv, 210);
+  const padL = o.padL || 46, padR = 8, padT = 10, padB = 34;
+  const lo = 0;
+  let hi = o.max;
+  if (hi == null) {
+    hi = -Infinity;
+    for (const s of series) for (const v of s.v) if (Number.isFinite(v)) hi = Math.max(hi, v);
+    if (!Number.isFinite(hi) || hi <= 0) hi = 1;
+    hi *= 1.08;
+  }
+  const Y = (v) => h - padB - (h - padT - padB) * (v - lo) / Math.max(hi - lo, 1e-9);
+  const plotW = Math.max(w - padL - padR, 20);
+  const gw = plotW / cats.length;
+  ctx.font = `11px ${mono()}`;
+  for (let g = 0; g <= 4; g++) {
+    const v = lo + (hi - lo) * g / 4, yy = Math.round(Y(v)) + 0.5;
+    ctx.strokeStyle = HOT3D.css('--line'); ctx.globalAlpha = 0.7;
+    ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(w - padR, yy); ctx.stroke();
+    ctx.globalAlpha = 1; ctx.fillStyle = HOT3D.css('--muted');
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ctx.fillText(o.fmtY ? o.fmtY(v) : v.toFixed(0), padL - 6, yy);
+  }
+  const inner = gw * 0.78, bw = Math.max(2, inner / series.length);
+  /* long bin labels: shrink, then thin, rather than let them touch */
+  let lw = Math.max(...cats.map((c) => ctx.measureText(c).width));
+  if (lw + 6 > gw) {
+    ctx.font = `9px ${mono()}`;
+    lw = Math.max(...cats.map((c) => ctx.measureText(c).width));
+  }
+  const every = lw + 6 > gw ? 2 : 1;
+  for (let c = 0; c < cats.length; c++) {
+    const gx = padL + gw * c + (gw - inner) / 2;
+    for (let s = 0; s < series.length; s++) {
+      const v = series[s].v[c];
+      if (!Number.isFinite(v)) continue;
+      ctx.fillStyle = series[s].color;
+      const y = Y(Math.min(v, hi)), hh = Math.max(1, h - padB - y);
+      ctx.fillRect(gx + bw * s, y, Math.max(1, bw - 1), hh);
+    }
+    ctx.fillStyle = HOT3D.css('--muted');
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    if (c % every === 0) ctx.fillText(cats[c], gx + inner / 2, h - padB + 5);
+  }
+  if (o.xLabel) {
+    ctx.fillStyle = HOT3D.css('--muted');
+    ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+    ctx.fillText(o.xLabel, w - padR, h - padB + 18);
+  }
+}
+
+function legend(el, items) {
+  el.innerHTML = items.map((it) => {
+    const mark = it.line ? `<i style="color:${it.color}"></i>`
+                         : `<span class="sw" style="color:${it.color}"></span>`;
+    return `<span>${mark}${esc(it.label)}</span>`;
+  }).join('');
+}
+
+/* ---------- headline figures ---------- */
+
+function renderFigs() {
+  const any = D[TRACKERS[0].key];
+  $('fFrames').textContent = f.n(any.false_positives.frames_scored);
+  $('fHands').textContent = f.n(any.overall.gt_hands);
+  $('fRecs').textContent = f.n(any.dataset.recordings_scored);
+  /* measured on matched hands; the widest-coverage run is closest to the whole set */
+  const widest = TRACKERS.slice().sort((a, b) =>
+    D[b.key].overall.detection_rate - D[a.key].overall.detection_rate)[0];
+  const meds = TRACKERS.map((t) => D[t.key].overall.gt_hand_diag_px.median);
+  $('fDiag').textContent = num(D[widest.key].overall.gt_hand_diag_px.median, 0);
+  return { widest, meds };
+}
+
+/* ---------- the comparison table ---------- */
+
+const ROWS = [
+  { g: 'Coverage', label: 'Detection rate', fmt: (b) => f.pct(b.detection_rate), val: (b) => b.detection_rate, best: 'max',
+    note: 'matched ground-truth hands / evaluable ground-truth hands' },
+  { label: 'Hands matched', fmt: (b) => f.n(b.matched), val: (b) => b.matched, best: 'max' },
+  { g: 'Error, all matched landmarks', label: 'Mean error, px', fmt: (b) => px(b.mpjpe_2d_px), val: (b) => b.mpjpe_2d_px, best: 'min', sep: true },
+  { label: 'Median error, px', fmt: (b) => px(b.err_px.median), val: (b) => b.err_px.median, best: 'min' },
+  { label: 'p90 error, px', fmt: (b) => px(b.err_px.p90), val: (b) => b.err_px.p90, best: 'min' },
+  { label: 'p95 error, px', fmt: (b) => px(b.err_px.p95), val: (b) => b.err_px.p95, best: 'min' },
+  { label: 'Mean, wrist excluded, px', fmt: (b) => px(b.mpjpe_2d_px_no_wrist), val: (b) => b.mpjpe_2d_px_no_wrist, best: 'min' },
+  { label: 'Mean, gross failures excluded, px', fmt: (b) => px(b.mpjpe_2d_px_excl_gross), val: (b) => b.mpjpe_2d_px_excl_gross, best: 'min' },
+  { label: 'Mean as % of median hand diagonal', fmt: (b) => f.pct(b.mpjpe_2d_px / b.gt_hand_diag_px.median), val: (b) => b.mpjpe_2d_px / b.gt_hand_diag_px.median, best: 'min' },
+  { g: 'Error by landmark group', label: 'Fingertips, mean px', fmt: (b) => px(b.fingertip_err_px.mean), val: (b) => b.fingertip_err_px.mean, best: 'min', sep: true },
+  { label: 'Wrist, mean px', fmt: (b) => px(b.wrist_err_px.mean), val: (b) => b.wrist_err_px.mean, best: 'min' },
+  { g: 'Failures', label: 'Gross failures (> 100 px mean)', fmt: (b) => f.n(b.gross_failures_gt100px), val: (b) => b.gross_failures_gt100px, best: 'min', sep: true },
+  { label: 'Gross-failure rate', fmt: (b) => f.pct(b.gross_failure_rate_gt100px), val: (b) => b.gross_failure_rate_gt100px, best: 'min' },
+  { g: 'Threshold-free summaries', label: 'PCK AUC, 0–100 px', fmt: (b) => num(b.pck_auc_px_0_100, 3), val: (b) => b.pck_auc_px_0_100, best: 'max', sep: true },
+  { label: 'PCK AUC, 0–0.5 × hand diagonal', fmt: (b) => num(b['pck_auc_norm_0_0.5'], 3), val: (b) => b['pck_auc_norm_0_0.5'], best: 'max' },
+  { g: 'Context', label: 'Median GT hand diagonal, px', fmt: (b) => px(b.gt_hand_diag_px.median, 1), val: () => null, best: null, sep: true },
+];
+
+function renderComparison() {
+  $('cmpHead').innerHTML = '<th scope="col" class="no-sort">Metric</th>' + TRACKERS.map((t) =>
+    `<th scope="col" class="no-sort num"><span class="sw ${t.cls}"></span> ${esc(t.label)}</th>`).join('');
+  const bs = TRACKERS.map((t) => block(t.key));
+  let lastGroup = null;
+  $('cmpBody').innerHTML = ROWS.map((r) => {
+    const vals = bs.map((b) => r.val(b));
+    let bestIdx = -1;
+    if (r.best) {
+      const fin = vals.map((v, i) => [v, i]).filter(([v]) => Number.isFinite(v));
+      if (fin.length) {
+        fin.sort((a, b2) => (r.best === 'max' ? b2[0] - a[0] : a[0] - b2[0]));
+        bestIdx = fin[0][1];
+      }
+    }
+    const head = r.g && r.g !== lastGroup
+      ? `<div class="note" style="margin:0 0 2px">${esc(r.g)}</div>` : '';
+    lastGroup = r.g || lastGroup;
+    const cells = bs.map((b, i) =>
+      `<td class="num${i === bestIdx ? ' best' : ''}">${r.fmt(b)}</td>`).join('');
+    const sub = r.note ? `<div class="note" style="margin:0">${esc(r.note)}</div>` : '';
+    return `<tr${r.sep ? ' class="sep"' : ''}><td>${head}${esc(r.label)}${sub}</td>${cells}</tr>`;
+  }).join('');
+
+  const agreeRow = TRACKERS.map((t) =>
+    `<td class="num">${f.pct(D[t.key].handedness.label_agreement_with_identity_on_geometric_matches)}</td>`).join('');
+  $('cmpBody').insertAdjacentHTML('beforeend',
+    `<tr class="sep"><td>Handedness label agreement<div class="note" style="margin:0">independent of the toggle above; see Handedness</div></td>${agreeRow}</tr>`);
+
+  /* the coverage sentence follows the toggle: geometric matches more hands, so quoting
+     `overall` here would contradict the table */
+  const chosen = [...new Set(TRACKERS.map((t) => D[t.key].handedness.chosen))];
+  const which = S.mapping === 'geom'
+    ? `the <strong>geometric oracle</strong> assignment (<span class="mono">by_mapping_geometric</span>), which pairs detections to ground-truth hands by cost and ignores the tracker's left/right labels — an upper bound on localisation with labelling taken out`
+    : `each tracker's <strong>own left/right labels</strong> (<span class="mono">overall</span>, under the mapping the scorer chose${
+        chosen.length === 1 ? `: ${esc(chosen[0])} for all three` : ` per tracker: ${TRACKERS.map((t) => `${t.label} ${esc(D[t.key].handedness.chosen)}`).join(', ')}`})`;
+  const cover = TRACKERS.map((t) => `${t.label} ${f.pct(block(t.key).detection_rate)}`).join(', ');
+  $('cmpNote').innerHTML = `Bold is the best value in the row. Values under ${which}. All three
+    runs score the same ${f.n(block('mediapipe').gt_hands)} evaluable ground-truth hands, so
+    detection rates are directly comparable. Errors are over matched hands only, and under this
+    assignment that is ${cover} of them. Source:
+    <span class="mono">data/trackers/&lt;tracker&gt;.json</span>.`;
+}
+
+function renderScale(figs) {
+  const mp = D.mediapipe.overall, wl = D.wilor.overall, hm = D.hamer.overall;
+  const lo = Math.min(...figs.meds), hi = Math.max(...figs.meds);
+  const ref = D[figs.widest.key].overall.gt_hand_diag_px.median;
+  const wd = D[figs.widest.key].overall.gt_hand_diag_px;
+  $('scaleProse').innerHTML = `Frames are 1408 × 1408. A pixel error means something only against
+    the size of the thing being localised: the median ground-truth hand spans
+    <strong>${num(ref, 0)} px</strong> corner to corner of its landmark bounding box
+    (${num(lo, 0)}–${num(hi, 0)} px across the three runs, which each measure it on the hands they
+    matched; ${num(wd.p25, 0)}–${num(wd.p75, 0)} px between the quartiles of the widest-coverage
+    run, ${esc(figs.widest.label)}). So the mean errors are
+    ${TRACKERS.map((t) => `${t.label} ${f.pct(D[t.key].overall.mpjpe_2d_px / D[t.key].overall.gt_hand_diag_px.median)}`).join(', ')}
+    of a hand. The normalised PCK AUC row divides each error by <em>that hand's</em> diagonal
+    rather than the median, so it is the row to use across distance.`;
+}
+
+/* ---------- curve ---------- */
+
+function drawCurve() {
+  if (!S.loaded) return;
+  const xs = D.mediapipe.protocol.px_thresholds;
+  const all = S.denom === 'all';
+  const series = TRACKERS.map((t) => {
+    const b = D[t.key].overall;
+    const scale = all ? b.detection_rate : 1;
+    return { v: b.pck_px_curve.map((p) => p * scale), color: colour(t), label: t.label };
+  });
+  xyPlot($('cCurve'), xs, series, {
+    min: 0, max: 100,
+    fmtY: (v) => `${v.toFixed(0)}%`,
+    fmtX: (v) => `${v.toFixed(0)}`,
+    xLabel: 'tolerance, px',
+  });
+  legend($('lgCurve'), TRACKERS.map((t) => ({ color: colour(t), label: t.label, line: true })));
+  const at = (t, thr) => {
+    const b = D[t.key].overall;
+    return b.pck_px_curve[thr] * (all ? b.detection_rate : 1);
+  };
+  /* PCK here is per landmark, not per hand: the curve passes 50% exactly at each tracker's
+     overall.err_px.median. Saying "hands" would be a different, stricter criterion. */
+  const nLm = D.mediapipe.protocol.landmarks_scored;
+  const med = D.mediapipe.overall.gt_hand_diag_px.median;
+  const ref = Math.round(med * 0.1);
+  const list = TRACKERS.map((t) => `${t.label} ${num(at(t, 20), 1)}%`).join(', ');
+  $('capCurve').innerHTML = all
+    ? `Share of all <strong>${f.n(D.mediapipe.overall.gt_hands * nLm)} scored landmark slots</strong>
+       (${f.n(D.mediapipe.overall.gt_hands)} evaluable hands × ${nLm} landmarks) placed within a
+       given pixel tolerance; all ${nLm} landmarks of an undetected hand fail at every tolerance.
+       At 20 px — about ${num(20 / med * 100, 0)}% of a median hand diagonal — ${esc(list)}.
+       No curve can rise above its tracker's detection rate
+       (${TRACKERS.map((t) => `${t.label} ${f.pct(D[t.key].overall.detection_rate)}`).join(', ')}).
+       Computed from <span class="mono">overall.pck_px_curve</span> × <span class="mono">overall.detection_rate</span>.`
+    : `Conventional PCK: share of the <strong>matched</strong> hands' landmarks within a given
+       tolerance, misses excluded from the denominator entirely. At 20 px, ${esc(list)}. This is
+       the curve that flatters a tracker for not trying — MediaPipe reaches
+       ${num(D.mediapipe.overall.pck_px_curve[100], 1)}% at 100 px, on the ${f.pct(D.mediapipe.overall.detection_rate)}
+       of hands it detected. From <span class="mono">overall.pck_px_curve</span>, which counts
+       landmarks rather than hands — it reads 50% at each tracker's
+       <span class="mono">overall.err_px.median</span>. X-ticks are
+       <span class="mono">protocol.px_thresholds</span>; ${ref} px is a tenth of a median hand.`;
+}
+
+/* ---------- distance ---------- */
+
+function distBins() { return Object.keys(D.mediapipe.by_distance_m); }
+
+function drawDistance() {
+  if (!S.loaded) return;
+  const bins = distBins();
+  const cats = bins.map((b) => b.replace('-inf', '+').replace(/^0\.00-/, '<').replace('-', '–'));
+  barPlot($('cDistDet'), cats, TRACKERS.map((t) => ({
+    color: colour(t), v: bins.map((b) => 100 * D[t.key].by_distance_m[b].detection_rate),
+  })), { max: 100, fmtY: (v) => `${v.toFixed(0)}%`, xLabel: 'distance to GT wrist, m' });
+  barPlot($('cDistErr'), cats, TRACKERS.map((t) => ({
+    color: colour(t), v: bins.map((b) => D[t.key].by_distance_m[b].err_px.median),
+  })), { fmtY: (v) => v.toFixed(0), xLabel: 'distance to GT wrist, m' });
+  const far = bins[bins.length - 1], near = bins[0];
+  /* the near-bin dip differs by tracker, so give the numbers */
+  const rate = (k, b) => f.pct(D[k].by_distance_m[b].detection_rate);
+  $('capDistDet').innerHTML = `Detection rate per distance bin, matched over evaluable
+    ground-truth hands. Bars in tracker order, ${TRACKERS.map((t) => t.label).join(', ')}. All
+    three fall off in the last bin, on its ${f.n(D.mediapipe.by_distance_m[far].gt_hands)} hands
+    (${TRACKERS.map((t) => `${t.label} ${rate(t.key, bins[bins.length - 2])} → ${rate(t.key, far)}`).join(', ')}).
+    The nearest bin dips too, steeply for one tracker and slightly for the others:
+    ${TRACKERS.map((t) => `${t.label} ${rate(t.key, near)} vs its best bin ${f.pct(Math.max(...bins.map((b) => D[t.key].by_distance_m[b].detection_rate)))}`).join(', ')}.`;
+  $('capDistErr').innerHTML = `<strong>Median</strong> 2D error per distance bin, pixels, over the
+    matched hands' landmarks — median rather than mean, because the mean in the far bins is
+    dominated by a few gross failures. Pixel error shrinks with distance because the hand does;
+    the normalised column in the table removes that.`;
+
+  const head = ['Distance, m', 'GT hands']
+    .map((h) => `<th scope="col" rowspan="2" class="no-sort${h === 'GT hands' ? ' num' : ''}">${h}</th>`).join('')
+    + TRACKERS.map((t) =>
+      `<th scope="colgroup" class="no-sort num" colspan="3"><span class="sw ${t.cls}"></span> ${esc(t.label)}</th>`).join('');
+  $('distHead').innerHTML = head;
+  $('distSub').innerHTML = TRACKERS.map(() => ['det.', 'median px', 'median / diag']
+    .map((h) => `<th scope="col" class="num">${h}</th>`).join('')).join('');
+  $('distBody').innerHTML = bins.map((b) => {
+    const gt = D.mediapipe.by_distance_m[b].gt_hands;
+    const cells = TRACKERS.map((t) => {
+      const x = D[t.key].by_distance_m[b];
+      return `<td class="num">${f.pct(x.detection_rate)}</td>`
+           + `<td class="num">${px(x.err_px.median)}</td>`
+           + `<td class="num">${f.pct(x.err_px.median / x.gt_hand_diag_px.median)}</td>`;
+    }).join('');
+    return `<tr><td class="mono">${esc(b.replace('-inf', ' and beyond').replace('-', ' – '))}</td>`
+         + `<td class="num">${f.n(gt)}</td>${cells}</tr>`;
+  }).join('');
+  const bulk = ['0.35-0.45', '0.45-0.55'].reduce((s, b) => s + D.mediapipe.by_distance_m[b].gt_hands, 0);
+  $('distNote').innerHTML = `“median / diag” is the bin's median error over the bin's median
+    ground-truth hand diagonal — the scale-free way to read the middle bins against the outer
+    ones. ${f.pct(bulk / D.mediapipe.overall.gt_hands)} of evaluable hands sit between 0.35 and
+    0.55 m, arm's length, so the overall means are mostly those two bins.
+    <span class="mono">protocol.distance</span> is Euclidean, camera centre to GT wrist.`;
+}
+
+/* ---------- ground truth + evaluation set ---------- */
+
+function renderGt() {
+  const p = D.mediapipe.protocol, ds = D.mediapipe.dataset;
+  $('kvGt').innerHTML = [
+    ['source', ds.gt],
+    ['landmarks scored', `${p.landmarks_scored} of ${p.landmark_order.length}`],
+    ['projection', p.projection],
+    ['image space', p.space],
+  ].map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+  $('gtNote').innerHTML = `${p.landmarks_scored} of the ${p.landmark_order.length} canonical
+    landmarks are scored: ${esc(p.unmatched_landmarks)}. That is the same set of 20 the
+    hand-tracking toolkit's benchmark evaluates, so these numbers sit next to published ones
+    (<span class="mono">protocol.landmark_order</span>,
+    <span class="mono">protocol.pred_to_canonical_map</span>). They are the same skinned UmeTrack
+    hands on the <a href="sequence.html">sequence viewer</a> and the
+    <a href="hands.html">hands page</a>.`;
+}
+
+function renderSet() {
+  const ds = D.mediapipe.dataset, fp = D.mediapipe.false_positives, p = D.mediapipe.protocol;
+  const rows = D.mediapipe.per_recording;
+  const withFrames = rows.filter((r) => r.frames > 0);
+  const capped = withFrames.filter((r) => r.frames === 350).length;
+  const maxFrames = Math.max(...withFrames.map((r) => r.frames));
+  const parts = new Set(rows.map((r) => r.participant));
+  const empty = ds.recordings_with_no_exported_frames;
+  $('setProse').innerHTML = `<strong>${f.n(fp.frames_scored)} frames</strong> across
+    ${f.n(ds.recordings_scored)} annotated Aria recordings and ${parts.size} participants, carrying
+    <strong>${f.n(D.mediapipe.overall.gt_hands)} evaluable ground-truth hands</strong>. The frames
+    are every tenth QA-passing frame, capped at ${f.n(maxFrames)} per recording; where the
+    stride-10 list overran the cap it was thinned evenly, not truncated, so the ${f.n(capped)} of
+    ${f.n(withFrames.length)} recordings at the cap are sampled coarser than every tenth. Both are
+    choices: consecutive frames at 30 fps are near-duplicates, and without a cap a few long
+    sessions would decide the overall number. The cost is that the per-recording rows are not
+    equally precise and the set is not a uniform sample of recorded time.`;
+  $('gateBody').innerHTML = [
+    ['Release QA', '<span class="mono">mask_qa_pass == 1</span> — HOT3D’s per-frame quality flag'],
+    ['Hand annotated', '<span class="mono">mask_hand_pose_available == 1</span> — a wrist transform and joint angles exist for this hand'],
+    ['Finite geometry', 'skinned ground-truth landmarks and headset pose both finite'],
+    ['In frame', `all ${p.landmarks_scored} scored landmarks project inside the 1408 × 1408 image (<span class="mono">all_in</span>)`],
+    ['Not a gate', '<span class="mono">mask_hand_visible</span> — a hand can be annotated in 3D while occluded, so visibility is a breakdown axis'],
+  ].map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('');
+  const relaxed = D.mediapipe.subsets.any_landmark_in_view;
+  $('setNote').innerHTML = `Relaxing the last gate to “at least one landmark inside the image”
+    admits ${f.n(relaxed.gt_hands - D.mediapipe.overall.gt_hands)} more hands
+    (${f.n(relaxed.gt_hands)} in total, <span class="mono">subsets.any_landmark_in_view</span>);
+    it is not the headline because a hand half outside the frame has no well-defined 20-landmark
+    error. One recording, <span class="mono">${esc(empty.join(', '))}</span>, exports no frames at
+    all — the release fails QA on every RGB frame — so it appears in the per-recording table with
+    zero counts and contributes nothing.`;
+}
+
+/* ---------- subsets ---------- */
+
+const SUBSETS = [
+  ['left', 'Left hand'],
+  ['right', 'Right hand'],
+  ['gt_hand_visible', 'GT hand visible'],
+  ['gt_hand_not_visible', 'GT hand not visible'],
+  ['any_landmark_in_view', 'Relaxed gate: any landmark in view'],
+];
+
+function renderSubsets() {
+  $('subHead').innerHTML = '<th scope="col" rowspan="2" class="no-sort">Subset</th>'
+    + '<th scope="col" rowspan="2" class="no-sort num">GT hands</th>'
+    + TRACKERS.map((t) => `<th scope="colgroup" class="no-sort num" colspan="2"><span class="sw ${t.cls}"></span> ${esc(t.label)}</th>`).join('');
+  $('subSub').innerHTML = TRACKERS.map(() =>
+    '<th scope="col" class="num">det.</th><th scope="col" class="num">mean px</th>').join('');
+  const rows = [['overall', 'All evaluable hands']].concat(SUBSETS);
+  $('subBody').innerHTML = rows.map(([k, label]) => {
+    const get = (t) => (k === 'overall' ? D[t.key].overall : D[t.key].subsets[k]);
+    const gt = get(TRACKERS[0]).gt_hands;
+    const cells = TRACKERS.map((t) => {
+      const b = get(t);
+      return `<td class="num">${f.pct(b.detection_rate)}</td><td class="num">${px(b.mpjpe_2d_px)}</td>`;
+    }).join('');
+    return `<tr${k === 'overall' ? ' class="sep"' : ''}><td>${esc(label)}</td><td class="num">${f.n(gt)}</td>${cells}</tr>`;
+  }).join('');
+  const nv = D.mediapipe.subsets.gt_hand_not_visible, v = D.mediapipe.subsets.gt_hand_visible;
+  const L = D.wilor.subsets.left, R = D.wilor.subsets.right;
+  $('subNote').innerHTML = `Only ${f.n(nv.gt_hands)} of the ${f.n(D.mediapipe.overall.gt_hands)}
+    evaluable hands are annotated but flagged not visible, the in-frame gate having removed most,
+    and what the trackers do there differs sharply:
+    ${TRACKERS.map((t) => {
+      const x = D[t.key].subsets.gt_hand_not_visible;
+      return `${t.label} matches ${f.n(x.matched)} (${f.pct(x.detection_rate)})`;
+    }).join(', ')}, all at mean errors above
+    ${num(Math.min(...TRACKERS.map((t) => D[t.key].subsets.gt_hand_not_visible.mpjpe_2d_px)), 0)} px.
+    Read it as a sanity check, not a result: a detector that scores well on hands the release
+    flags invisible is matching something else, so HaMeR's rate there is a warning, not a
+    strength. The visible subset is
+    ${f.pct(v.gt_hands / D.mediapipe.overall.gt_hands)} of the set, so its numbers are the overall
+    numbers. The left/right split is the one worth reading: the set holds
+    ${f.n(L.gt_hands)} left and ${f.n(R.gt_hands)} right hands, and the per-side gaps do not point
+    the same way —
+    ${TRACKERS.map((t) => {
+      const d = D[t.key].subsets.right.detection_rate - D[t.key].subsets.left.detection_rate;
+      return `${t.label} ${(Math.abs(d) * 100).toFixed(1)} pts toward the ${d >= 0 ? 'right' : 'left'}`;
+    }).join(', ')}. The one large gap belongs to ${esc(TRACKERS.slice().sort((a, b) =>
+      Math.abs(D[b.key].subsets.right.detection_rate - D[b.key].subsets.left.detection_rate)
+      - Math.abs(D[a.key].subsets.right.detection_rate - D[a.key].subsets.left.detection_rate))[0].label)},
+    whose left/right labels are also the least reliable.`;
+}
+
+/* ---------- per landmark ---------- */
+
+function renderLandmarks() {
+  const order = D.mediapipe.protocol.landmark_order.slice(0, D.mediapipe.protocol.landmarks_scored);
+  let max = 0;
+  for (const t of TRACKERS) for (const n of order) max = Math.max(max, D[t.key].overall.per_landmark_px[n].mean);
+  legend($('lgLm'), TRACKERS.map((t) => ({ color: colour(t), label: t.label })));
+  $('lmBars').innerHTML = order.map((n) => {
+    const hi = n === 'WRIST';
+    const bars = TRACKERS.map((t) => {
+      const m = D[t.key].overall.per_landmark_px[n].mean;
+      return `<div class="bar ${t.cls}" role="img" aria-label="${esc(t.label)} ${esc(n)} ${num(m, 1)} pixels">`
+           + `<b style="width:${(100 * m / max).toFixed(1)}%"></b><u>${num(m, 1)}</u></div>`;
+    }).join('');
+    return `<div class="barrow${hi ? ' hi' : ''}"><div class="lab" title="${esc(n)}">${esc(n.toLowerCase().replace(/_/g, ' '))}</div>`
+         + `<div class="barset">${bars}</div></div>`;
+  }).join('');
+  const worst = TRACKERS.map((t) => {
+    const per = D[t.key].overall.per_landmark_px;
+    const sorted = order.slice().sort((a, b) => per[b].mean - per[a].mean);
+    return `${t.label} ${sorted[0].toLowerCase().replace(/_/g, ' ')} (${num(per[sorted[0]].mean, 1)} px)`;
+  }).join(', ');
+  /* computed, not asserted: the chain order is not the same for all three */
+  const CH = ['THUMB', 'INDEX', 'MIDDLE', 'RING', 'PINKY'];
+  const chain = (t) => {
+    const per = D[t.key].overall.per_landmark_px;
+    const mean = (c) => {
+      const v = order.filter((n) => n.split('_')[0] === c).map((n) => per[n].mean);
+      return v.reduce((a, b) => a + b, 0) / v.length;
+    };
+    const s = CH.slice().sort((a, b) => mean(b) - mean(a));
+    return `${t.label} ${s[0].toLowerCase()} worst, ${s[s.length - 1].toLowerCase()} best`;
+  };
+  $('lmNote').innerHTML = `Bars share one scale, ending at ${num(max, 1)} px. Mean error over
+    matched hands, from <span class="mono">overall.per_landmark_px</span>. Worst landmark per
+    tracker: ${esc(worst)} — the wrist for all three, by a margin, which is the first caveat
+    below. Averaging each finger's chain, the worst and best chain are
+    ${esc(TRACKERS.map(chain).join('; '))}.`;
+}
+
+/* ---------- handedness ---------- */
+
+function renderHandedness() {
+  $('handHead').innerHTML = '<th scope="col" class="no-sort">Tracker</th>'
+    + ['Chosen mapping', 'Label agreement', 'Identity: det.', 'Identity: mean px',
+       'Swapped: det.', 'Swapped: mean px', 'Geometric: det.', 'Geometric: mean px',
+       'Cost of labelling']
+      .map((h, i) => `<th scope="col" class="no-sort${i === 0 ? '' : ' num'}">${h}</th>`).join('');
+  $('handBody').innerHTML = TRACKERS.map((t) => {
+    const h = D[t.key].handedness, c = h.comparison;
+    const chosen = c[h.chosen] || c.identity;
+    const cost = chosen.mpjpe_2d_px - c.geometric.mpjpe_2d_px;
+    return `<tr><td><span class="sw ${t.cls}"></span> ${esc(t.label)}</td>`
+      + `<td class="mono">${esc(h.chosen)}</td>`
+      + `<td class="num">${f.pct(h.label_agreement_with_identity_on_geometric_matches)}</td>`
+      + `<td class="num">${f.pct(c.identity.detection_rate)}</td><td class="num">${px(c.identity.mpjpe_2d_px)}</td>`
+      + `<td class="num">${f.pct(c.swapped.detection_rate)}</td><td class="num">${px(c.swapped.mpjpe_2d_px)}</td>`
+      + `<td class="num">${f.pct(c.geometric.detection_rate)}</td><td class="num">${px(c.geometric.mpjpe_2d_px)}</td>`
+      + `<td class="num">${cost >= 0 ? '+' : ''}${px(cost)} px</td></tr>`;
+  }).join('');
+
+  const mp = D.mediapipe, c = mp.handedness.comparison;
+  const drop = 1 - c.geometric.mpjpe_2d_px / c.identity.mpjpe_2d_px;
+  const gain = (k) => px(D[k].handedness.comparison.identity.mpjpe_2d_px - D[k].by_mapping_geometric.mpjpe_2d_px);
+  $('handCall').innerHTML = `<p style="margin:0"><strong>MediaPipe's left/right labels cost it
+    about half its accuracy.</strong> Under its own labels it scores ${px(c.identity.mpjpe_2d_px)} px
+    mean error at ${f.pct(c.identity.detection_rate)} detection; with labels ignored and the same
+    detections paired geometrically, ${px(c.geometric.mpjpe_2d_px)} px at
+    ${f.pct(c.geometric.detection_rate)} — ${f.pct(drop)} less mean error and
+    ${f.n(c.geometric.matched - c.identity.matched)} more hands matched, from identical
+    predictions. Its label agrees with the ground-truth side on only
+    ${f.pct(mp.handedness.label_agreement_with_identity_on_geometric_matches)} of oracle-matched
+    hands. The gap is actionable: in an egocentric view the side of a hand is recoverable from geometry,
+    so re-deriving handedness is nearly free accuracy. WiLoR
+    (${f.pct(D.wilor.handedness.label_agreement_with_identity_on_geometric_matches)} agreement,
+    ${gain('wilor')} px to gain) and HaMeR
+    (${f.pct(D.hamer.handedness.label_agreement_with_identity_on_geometric_matches)},
+    ${gain('hamer')} px) have almost nothing left on the table.</p>`;
+
+  $('hProse').insertAdjacentHTML('beforeend', ` The scorer picks whichever label mapping gives the
+    lower mean error and uses it everywhere else on this page — here
+    <span class="mono">${esc(mp.handedness.chosen)}</span> for all three, and the swapped column
+    shows how unambiguous that is. “Cost of labelling” is the chosen mapping's mean error minus the
+    geometric one's; label agreement is on oracle-matched hands only, so it does not depend on the
+    choice.`);
+}
+
+/* ---------- false positives ---------- */
+
+function renderFp() {
+  const FPROWS = [
+    ['detections_total', 'Detections returned', (v) => f.n(v)],
+    ['mean_detections_per_frame', 'Detections per frame', (v) => num(v, 2)],
+    ['detections_unassigned', 'Detections matched to no GT hand', (v) => f.n(v)],
+    ['detections_on_frames_with_no_gt_hand_annotated', 'Detections on frames with no GT hand annotated', (v) => f.n(v)],
+    ['frames_gt_none_in_view_but_detected', 'Frames with no GT hand in view but a detection', (v) => f.n(v)],
+    ['frames_gt_in_view_but_nothing_detected', 'Frames with a GT hand in view and no detection', (v) => f.n(v)],
+  ];
+  $('fpHead').innerHTML = '<th scope="col" class="no-sort">Count</th>'
+    + TRACKERS.map((t) => `<th scope="col" class="no-sort num"><span class="sw ${t.cls}"></span> ${esc(t.label)}</th>`).join('');
+  $('fpBody').innerHTML = FPROWS.map(([k, label, fn]) =>
+    `<tr><td>${esc(label)}</td>`
+    + TRACKERS.map((t) => `<td class="num">${fn(D[t.key].false_positives[k])}</td>`).join('')
+    + '</tr>').join('');
+  const fp = D.mediapipe.false_positives;
+  const share = (t) => {
+    const x = D[t.key].false_positives;
+    return `${t.label} ${f.pct(x.detections_unassigned / x.detections_total)}`;
+  };
+  $('fpNote').innerHTML = `All three ran over the same ${f.n(fp.frames_scored)} frames, of which
+    ${f.n(fp.frames_with_no_gt_hand_annotated)} carry no ground-truth hand annotation at all.
+    The share of detections that matched nothing is ${TRACKERS.map(share).join(', ')} — HaMeR
+    returns the most detections (${f.n(D.hamer.false_positives.detections_total)}, ${num(D.hamer.false_positives.mean_detections_per_frame, 2)}
+    per frame) and the most spurious ones, the other side of its high detection rate and again
+    partly its box front-end. Only MediaPipe often finds nothing where there is something:
+    ${TRACKERS.map((t) => `${t.label} ${f.n(D[t.key].false_positives.frames_gt_in_view_but_nothing_detected)}`).join(', ')}
+    frames with a GT hand in view and no detection. A detection on a frame with no annotated hand
+    is not necessarily wrong — a bystander's hand is a hand and the release annotates only the
+    wearer — so this is an upper bound.`;
+}
+
+/* ---------- per recording ---------- */
+
+let sort = { k: 'seq', dir: 1 };
+
+function recRows() {
+  const base = D.mediapipe.per_recording;
+  return base.map((r, i) => {
+    const row = { seq: r.seq, participant: r.participant, frames: r.frames, gt_hands: r.gt_hands, note: r.note || '' };
+    for (const t of TRACKERS) {
+      const x = D[t.key].per_recording[i];
+      /* align by name: a mismatch would silently mix recordings */
+      const s = x && x.seq === r.seq ? x : D[t.key].per_recording.find((q) => q.seq === r.seq);
+      row[`${t.key}_det`] = s ? s.detection_rate : null;
+      row[`${t.key}_err`] = s ? s.mpjpe_2d_px : null;
+    }
+    return row;
+  });
+}
+
+const RECCOLS = [
+  { k: 'seq', label: 'Recording', type: 'text', cell: (r) => `<td class="mono">${esc(r.seq)}</td>` },
+  { k: 'participant', label: 'Part.', type: 'text', cell: (r) => `<td class="mono">${esc(r.participant)}</td>` },
+  { k: 'frames', label: 'Frames', type: 'num', cell: (r) => `<td class="num">${f.n(r.frames)}</td>` },
+  { k: 'gt_hands', label: 'GT hands', type: 'num', cell: (r) => `<td class="num">${f.n(r.gt_hands)}</td>` },
+].concat(TRACKERS.flatMap((t) => [
+  { k: `${t.key}_det`, label: `${t.label} det.`, type: 'num',
+    cell: (r) => `<td class="num">${r[`${t.key}_det`] == null ? '—' : f.pct(r[`${t.key}_det`])}</td>` },
+  { k: `${t.key}_err`, label: `${t.label} mean px`, type: 'num',
+    cell: (r) => `<td class="num">${r[`${t.key}_err`] == null ? '—' : px(r[`${t.key}_err`])}</td>` },
+]));
+
+function renderRecordings() {
+  const rows = recRows();
+  $('recHead').innerHTML = RECCOLS.map((c) => {
+    const active = sort.k === c.k;
+    const arrow = active ? ` <span class="arw">${sort.dir > 0 ? '▲' : '▼'}</span>` : '';
+    return `<th scope="col" class="${c.type === 'num' ? 'num ' : ''}${active ? 'sorted' : ''}"`
+      + ` data-k="${c.k}" tabindex="0" title="sort by ${esc(c.label)}"`
+      + ` aria-sort="${active ? (sort.dir > 0 ? 'ascending' : 'descending') : 'none'}">${esc(c.label)}${arrow}</th>`;
+  }).join('');
+  for (const th of $('recHead').querySelectorAll('th[data-k]')) {
+    const go = () => {
+      const c = RECCOLS.find((x) => x.k === th.dataset.k);
+      if (sort.k === c.k) sort.dir = -sort.dir;
+      else sort = { k: c.k, dir: c.type === 'num' ? -1 : 1 };
+      renderRecordings();
+    };
+    th.addEventListener('click', go);
+    th.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+  }
+  const out = rows.slice().sort((a, b) => {
+    const va = a[sort.k], vb = b[sort.k];
+    if (va == null && vb == null) return 0;
+    if (va == null) return 1;                      // missing sorts last either way
+    if (vb == null) return -1;
+    if (va === vb) return a.seq < b.seq ? -1 : 1;
+    return (va < vb ? -1 : 1) * sort.dir;
+  });
+  $('recBody').innerHTML = out.map((r) =>
+    `<tr${r.note ? ` title="${esc(r.note)}"` : ''}>${RECCOLS.map((c) => c.cell(r)).join('')}</tr>`).join('');
+
+  const det = TRACKERS.map((t) => {
+    const v = rows.map((r) => r[`${t.key}_det`]).filter(Number.isFinite).sort((a, b) => a - b);
+    return { t, lo: v[0], hi: v[v.length - 1], med: v[v.length >> 1], n: v.length };
+  });
+  $('recNote').innerHTML = `${f.n(rows.length)} recordings; the one with no exported frames shows
+    zeroes and dashes. Detection rate spreads much further per recording than the overall
+    number suggests — ${det.map((d) => `${d.t.label} ${f.pct(d.lo)}–${f.pct(d.hi)} (median ${f.pct(d.med)})`).join(', ')}
+    — so the overall figures average over recordings differing in lighting, clutter and how much of
+    the hand is in frame. Columns are
+    <span class="mono">per_recording.detection_rate</span> and
+    <span class="mono">per_recording.mpjpe_2d_px</span>.`;
+}
+
+/* ---------- caveats and provenance ---------- */
+
+function renderCaveats() {
+  const order = D.mediapipe.protocol.landmark_order.slice(0, D.mediapipe.protocol.landmarks_scored);
+  const w = TRACKERS.map((t) => {
+    const b = D[t.key].overall;
+    return `${t.label} ${px(b.wrist_err_px.mean)} px against ${px(b.mpjpe_2d_px_no_wrist)} px for the other 19`;
+  }).join('; ');
+  $('cavWrist').innerHTML = `UmeTrack's wrist landmark and the MANO/MediaPipe wrist are not the
+    same anatomical point, so part of the wrist error is a definition mismatch that no tracker can
+    remove. It is the worst for all three, and not by a little: ${esc(w)}. That is why
+    <span class="mono">mpjpe_2d_px_no_wrist</span> sits next to the headline mean, though dropping
+    one landmark of twenty moves it by only
+    ${TRACKERS.map((t) => `${t.label} ${px(D[t.key].overall.mpjpe_2d_px - D[t.key].overall.mpjpe_2d_px_no_wrist)} px`).join(', ')}.
+    Fingertips are the other end of that axis, the least convention-dependent points on a hand,
+    and are reported separately for the same reason. The penalty is not uniform: WiLoR's
+    wrist error (${px(D.wilor.overall.wrist_err_px.mean)} px) exceeds HaMeR's
+    (${px(D.hamer.overall.wrist_err_px.mean)} px) although WiLoR is the more accurate of the two
+    on ${(() => {
+      const w = D.wilor.overall.per_landmark_px, h = D.hamer.overall.per_landmark_px;
+      const rest = order.filter((n) => n !== 'WRIST');
+      return `${rest.filter((n) => w[n].mean < h[n].mean).length} of the other ${rest.length}`;
+    })()} landmarks, which is what a systematic offset looks like rather than noise.`;
+  const wmeds = distBins().map((b) => D.wilor.by_distance_m[b].err_px.median);
+  $('cav2d').innerHTML = `Everything here is in pixels of the upright 1408 × 1408 RGB frame, not
+    millimetres. Two of the three trackers do not produce metric hands, so a 3D comparison would
+    either exclude them or need a per-hand scale fit, and that fit would hide the failure mode a
+    downstream user cares about. So error depends on how far the hand is — WiLoR's median varies by
+    a factor of ${num(Math.max(...wmeds) / Math.min(...wmeds), 1)} across the bins — and the
+    normalised columns, which divide by the hand's own diagonal, are the fair comparison.`;
+}
+
+function renderProvenance() {
+  const ds = D.mediapipe.dataset, fp = D.mediapipe.false_positives;
+  $('provProse').innerHTML = `All three trackers saw the same images: one set of exported upright
+    1408 × 1408 JPEGs, one per scored frame. One scorer serves all three, so adding a tracker means
+    writing its predictions in the shared npz schema — one row per exported frame, misses
+    included — and rerunning that scorer.`;
+  $('provFrames').innerHTML = `${f.n(fp.frames_scored)} frames from
+    ${f.n(ds.recordings_scored)} recordings, exported once as
+    <span class="mono">np.rot90(raw, k=-1)</span> of the sensor image. The scorer's raw-to-upright
+    rotation was cross-checked against the release's own 2D hand boxes, rotated by a different
+    script: 1,466,850 of 1,466,980 landmark-in-box tests pass (99.99%) over 73,349 boxes, worst
+    recording 99.88%. That check is from <span class="mono">data/trackers/SCHEMA.md</span> §8, the
+    only figure on this page not read from the JSON. Predictions live in
+    <span class="mono">${esc(ds.pred_root.replace(/mediapipe$/, ''))}&lt;tracker&gt;</span>.`;
+  const impl = [...new Set(TRACKERS.map((t) => D[t.key].metric_impl))];
+  $('provScore').innerHTML = `Metric implementation:
+    <span class="mono">${esc(impl.join(', '))}</span>${impl.length === 1 && impl[0] === 'hand_tracking_toolkit'
+      ? ` — the hand-tracking toolkit's own <span class="mono">PCK_curve</span>,
+          <span class="mono">normalized_AUC</span> and <span class="mono">compute_mpjpe</span>,
+          not a local reimplementation, for all three runs`
+      : ' — not the same implementation for every run; compare with care'}.
+    Schema <span class="mono">${esc(D.mediapipe.schema_version)}</span>. HaMeR dropped
+    ${f.n(D.hamer.dataset.detections_dropped_nonfinite_landmarks)} detections with non-finite
+    landmarks across ${f.n(Object.keys(D.hamer.dataset.detections_dropped_nonfinite_landmarks_by_recording).length)}
+    recordings; WiLoR dropped ${f.n(D.wilor.dataset.detections_dropped_nonfinite_landmarks)}.`;
+  $('provRuns').innerHTML = TRACKERS.map((t) =>
+    `<div><span class="sw ${t.cls}"></span> <strong>${esc(t.label)}</strong> — scored
+     ${esc(new Date(D[t.key].created_utc).toISOString().slice(0, 16).replace('T', ' '))} UTC,
+     ${f.s(D[t.key].wall_s, 0)} of scoring wall time.</div>`).join('')
+    + `<div class="note" style="margin-top:8px">Wall time is the scorer's, not the tracker's:
+       the results files carry no prediction-run timings, so nothing here compares how long the
+       trackers themselves take.</div>`;
+  $('provVer').innerHTML = `These files do not carry the tracker versions. Each prediction npz
+    records <span class="mono">tracker_version</span>, <span class="mono">model_file</span> and
+    <span class="mono">model_md5</span>, but the results JSON does not copy them forward, so this
+    page cannot state them without inventing them. Read the version off the prediction files
+    before quoting any of these numbers against a specific release.`;
+}
+
+/* ---------- redraw on theme / resize ---------- */
+
+function drawAll() { drawCurve(); drawDistance(); }
+let rt = 0;
+addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(drawAll, 120); });
+new MutationObserver(drawAll).observe(document.documentElement,
+  { attributes: true, attributeFilter: ['data-theme'] });
+if (matchMedia('(prefers-color-scheme: dark)').addEventListener) {
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawAll);
+}
+
+/* ---------- toggles ---------- */
+
+function bindPair(aId, bId, setA, setB) {
+  const a = $(aId), b = $(bId);
+  a.addEventListener('click', () => { a.setAttribute('aria-pressed', 'true'); b.setAttribute('aria-pressed', 'false'); setA(); });
+  b.addEventListener('click', () => { b.setAttribute('aria-pressed', 'true'); a.setAttribute('aria-pressed', 'false'); setB(); });
+}
+
+/* ---------- boot ---------- */
+
+(async () => {
+  const status = $('status');
+  try {
+    const loaded = await Promise.all(TRACKERS.map((t) => loadResults(`data/trackers/${t.key}.json`)));
+    TRACKERS.forEach((t, i) => { D[t.key] = loaded[i]; });
+    const gt = new Set(TRACKERS.map((t) => D[t.key].overall.gt_hands));
+    if (gt.size !== 1) throw new Error(`the three runs score different hand counts (${[...gt].join(', ')})`);
+    S.loaded = true;
+
+    const figs = renderFigs();
+    renderComparison();
+    renderScale(figs);
+    renderGt();
+    renderSet();
+    renderSubsets();
+    renderLandmarks();
+    renderHandedness();
+    renderFp();
+    renderRecordings();
+    renderCaveats();
+    renderProvenance();
+    drawAll();
+
+    bindPair('mLabel', 'mGeom',
+      () => { S.mapping = 'label'; renderComparison(); },
+      () => { S.mapping = 'geom'; renderComparison(); });
+    bindPair('dAll', 'dMatched',
+      () => { S.denom = 'all'; drawCurve(); },
+      () => { S.denom = 'matched'; drawCurve(); });
+
+    status.textContent =
+      `Read ${TRACKERS.length} results files: ${f.n(D.mediapipe.false_positives.frames_scored)} frames, `
+      + `${f.n(D.mediapipe.overall.gt_hands)} evaluable ground-truth hands, `
+      + `${f.n(D.mediapipe.dataset.recordings_scored)} recordings, schema ${D.mediapipe.schema_version}.`;
+  } catch (e) {
+    status.innerHTML = `<span style="color:var(--bad)">Could not load the tracker results: ${esc(e.message)}.</span>
+      The tables and charts below stay empty; the prose describes the evaluation, not this page's numbers.`;
+    for (const id of ['cmpBody', 'distBody', 'subBody', 'handBody', 'fpBody', 'recBody', 'gateBody']) {
+      const el = $(id);
+      if (el) el.innerHTML = `<tr><td colspan="10">No data — ${esc(e.message)}</td></tr>`;
+    }
+    $('lmBars').innerHTML = `<p class="note">No data — ${esc(e.message)}</p>`;
+  }
+})();
+})();
+</script>
+</body>
+</html>

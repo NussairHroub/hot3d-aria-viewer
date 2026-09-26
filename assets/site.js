@@ -18,6 +18,7 @@ const HOT3D = (() => {
     ['sequence.html', 'Sequence viewer'],
     ['scene3d.html', '3D scene'],
     ['hands.html', 'Hands'],
+    ['trackers.html', 'Hand trackers'],
     ['objects.html', 'Objects'],
     ['cameras.html', 'Cameras'],
     ['gaze.html', 'Eye gaze'],
