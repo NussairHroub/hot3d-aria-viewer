@@ -65,7 +65,8 @@ ShareAlike requires that modifications be indicated. This repository:
 - filters the semidense points to `dist_std` ≤ 2 cm and subsamples them evenly to about 60k points
   per recording;
 - re-exports the object models with textures resampled to 512 px and geometry decimated to at most
-  40k faces;
+  40k faces, and samples 400 area-weighted surface points from each of them into
+  `data/objects/points.json`, which is Model data and carries the same terms as the models;
 - splits hand annotations into their own files and omits the MANO parameters.
 
 No original recording, VRS file or unmodified release archive is redistributed here. The full

@@ -19,7 +19,7 @@ directories carries its own `LICENSE`; the details are in [`DATA_LICENSE.md`](DA
 | `index.html` | Overview and dataset totals |
 | `recordings.html` | All 198 Aria recordings, sortable and filterable |
 | `sequence.html` | The video with boxes, masks and a per-frame readout |
-| `scene3d.html` | Scene points, headset path, object poses and wrists in 3D |
+| `scene3d.html` | Scene points, headset path, object poses and surface points, and wrists in 3D |
 | `hands.html` | UmeTrack and MANO: availability, wrist traces, joint angles |
 | `objects.html` | The 33-object library as 3D models, with usage and motion |
 | `cameras.html` | The three streams, their calibration and the rig layout |
@@ -37,6 +37,7 @@ data/seq/<SEQ>.json    per-recording payload, everything except hand annotations
 data/hands/<SEQ>.hands.json  hand annotations, licensed separately (non-commercial)
 data/objects.json      the object library index
 data/objects/*.glb     object models, compacted for the web
+data/objects/points.json  400 surface points per model, for the 3D scene's object-point layer
 media/<SEQ>_rgb.mp4    704x704 H.264, 30 fps — frame i is row i of every payload array
 media/<SEQ>_*.jpg      poster frame and SLAM-camera stills
 scripts/               the extraction pipeline (runs where the dataset is, not in the browser)
@@ -62,11 +63,14 @@ python scripts/hot3d_index.py   <dataset_dir> data/index.json
 python scripts/hot3d_extract.py <dataset_dir>/<SEQ> data/seq/<SEQ>.json
 python scripts/hot3d_media.py   <dataset_dir>/<SEQ> media --size 704 --crf 30
 python scripts/hot3d_objects.py <dataset_dir>/assets/assets data/index.json data/objects data/objects.json
+python scripts/hot3d_object_points.py data/objects.json data/objects data/objects/points.json
 ```
 
 `hot3d_extract.py` needs numpy; `hot3d_media.py` needs `projectaria-tools`, Pillow and ffmpeg
 (`imageio-ffmpeg` supplies a build with libx264); `hot3d_objects.py` needs trimesh,
-`fast-simplification` and Pillow on Python 3.10+.
+`fast-simplification` and Pillow on Python 3.10+. `hot3d_object_points.py` needs only numpy — it
+reads the glb containers directly, applying the glTF node hierarchy, and checks itself by
+reproducing each model's released `extent_m` (worst disagreement across the 33 models: 0.05 mm).
 
 ## Licence
 

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>3D scene · HOT3D Aria</title>
-<meta name="description" content="A HOT3D Aria recording in world coordinates: semidense scene points, the headset path and camera field, object poses as oriented boxes and axis triads, and both wrists, played on a timeline.">
+<meta name="description" content="A HOT3D Aria recording in world coordinates: semidense scene points, the headset path and camera field, object poses as oriented boxes, surface points and axis triads, and both wrists, played on a timeline.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -49,7 +49,7 @@
     <p class="eyebrow">World coordinates · one metric frame</p>
     <h1>The whole recording as one 3D scene</h1>
     <p class="lede">Every annotation in a HOT3D recording lives in the same metric world frame: the
-    semidense scene points, the headset's trajectory and camera, the pose of each object, and both
+    semidense scene points, the headset's trajectory and camera, the pose and surface of each object, and both
     wrists. This page draws that frame directly and plays it on the recording's own timeline, so the
     motion capture can be read as geometry rather than as columns of numbers. Z is up; the origin is
     the world frame the release ships.</p>
@@ -130,6 +130,7 @@
         <tr><td>Headset path</td><td class="mono">headset.T, headset.Q</td><td>A line through the headset position at every frame, plus the device axis triad at the current frame. This track is <b>not</b> motion capture: <span class="mono">headset_trajectory.csv</span> carries the device's own MPS closed-loop SLAM trajectory, resampled onto the frame grid — its values match <span class="mono">mps/slam/closed_loop_trajectory.csv</span> to the last digit. Object and hand poses are motion capture; the headset pose is not.</td></tr>
         <tr><td>RGB field</td><td class="mono">cameras[camera-rgb]</td><td>The released <span class="mono">T_Device_Camera</span> applied to the headset pose; the cone half-angle is the released <span class="mono">maxSolidAngle</span>, not a guess.</td></tr>
         <tr><td>Objects</td><td class="mono">objects[].T, .Q</td><td>An oriented box with the object's <span class="mono">extent_m</span> from <span class="mono">data/objects.json</span>, centred on the model's own bounding-box centre, placed by the released pose.</td></tr>
+        <tr><td>Object points</td><td class="mono">objects[].T, .Q<br>+ data/objects/points.json</td><td>400 points sampled over each model's surface, placed by the released pose: <span class="mono">p_world = Q · p_model + T</span>. Area-weighted samples over the triangles, not vertices — a decimated mesh puts its vertices where the curvature is, so a vertex sample clusters on detail and leaves flat faces bare. Sampled once by <span class="mono">scripts/hot3d_object_points.py</span> because the models themselves are 29.7 MB against this file's 215 kB. The reading of the glb is checked against the release: for all 33 models the sampled triangle bounds reproduce <span class="mono">extent_m</span> to within 0.05 mm.</td></tr>
         <tr><td>Object axes</td><td class="mono">objects[].T, .Q</td><td>The same released pose drawn as the object's own axes — X <span style="color:#e5484d">red</span>, Y <span style="color:#3fb950">green</span>, Z <span style="color:#4c8dff">blue</span> — as solid arrows, each half the object's longest side. Orientation is what a wireframe box cannot show; the axes are the model frame the release ships, so they are comparable across frames of one object, not between different objects.</td></tr>
         <tr><td>Wrists</td><td class="mono">hands.{left,right}.umetrack<br>in data/hands/&lt;seq&gt;.hands.json</td><td>A sphere at <span class="mono">wrist_t</span>, the wrist's own axes from <span class="mono">wrist_q</span> drawn as solid arrows in the same X&nbsp;<span style="color:#e5484d">red</span>, Y&nbsp;<span style="color:#3fb950">green</span>, Z&nbsp;<span style="color:#4c8dff">blue</span> convention as the objects, and a one-second trailing path. This is the one layer that comes from a second file: hand annotations carry their own licence, so they are never merged into the payload.</td></tr>
         <tr><td>Hand joints</td><td class="mono">hands.{left,right}.umetrack<br>.landmarks</td><td>The 21 UmeTrack landmarks, skinned by the extractor from the participant's own shape profile (<span class="mono">umetrack_hand_user_profile.json</span>) and the released wrist transform and 22 joint angles. The release ships the model and the parameters, not the points. Checked by projecting every landmark into the RGB camera and testing it against the release's own 2D hand box: 100% inside on both hands.</td></tr>
@@ -186,6 +187,7 @@ const LAYERS = [
   ['path',    'Headset path', '--c-headset'],
   ['frustum', 'RGB camera field', '--c-headset'],
   ['objects', 'Object boxes', '--c-object'],
+  ['opoints', 'Object points', '--c-object'],
   ['axes',    'Object axes', '--c-object'],
   ['hands',   'Wrists', '--c-hand'],
   ['joints',  'Hand joints', '--c-hand'],
@@ -465,6 +467,13 @@ async function load(seq) {
   const lib = await HOT3D.json('data/objects.json').catch(() => null);
   if (ticket !== loadTicket) return;
   const extents = new Map((lib ? lib.objects : []).map(o => [o.uid, o.extent_m]));
+  /* Surface samples of each model, in the model frame. 215 kB for all 33 objects against
+     29.7 MB of glb, which is why they are precomputed rather than read from the meshes. A
+     missing file costs only this layer: `pts` stays null and nothing else changes. */
+  const opts = await HOT3D.json('data/objects/points.json').catch(() => null);
+  if (ticket !== loadTicket) return;
+  const clouds = new Map(Object.entries((opts && opts.objects) || {})
+    .map(([uid, o]) => [uid, HOT3D.f32(o.xyz, 3)]));
 
   /* the hand file, rejected if it is missing, malformed, or not this recording frame for frame */
   const hres = await handsReq;
@@ -589,12 +598,33 @@ async function load(seq) {
       poseNode.add(shell, edges);
     }
     groups.objects.add(poseNode);
+
+    /* the object's own surface, as a cloud in the model frame. The node carries the released
+       pose, so three.js applies it on the GPU and the points never need rewriting per frame. */
+    let ptsNode = null;
+    const cl = clouds.get(o.uid);
+    if (cl && cl.length) {
+      const flat = new Float32Array(cl.length * 3);
+      for (let k = 0; k < cl.length; k++) {
+        flat[k * 3] = cl[k][0]; flat[k * 3 + 1] = cl[k][1]; flat[k * 3 + 2] = cl[k][2];
+      }
+      const og = new THREE.BufferGeometry();
+      og.setAttribute('position', new THREE.Float32BufferAttribute(flat, 3));
+      const om = new THREE.PointsMaterial({ color: col('--c-object'), size: 0.004,
+        sizeAttenuation: true, transparent: true, opacity: 0.95 });
+      const cloudPts = new THREE.Points(og, om);
+      cloudPts.userData.colorVar = '--c-object';
+      ptsNode = new THREE.Group();
+      ptsNode.add(cloudPts);
+      groups.opoints.add(ptsNode);
+    }
+
     // half the object's longest side: long enough to read, short enough to stay its own object's
     const axisLen = Math.min(Math.max(size ? Math.max(size[0], size[1], size[2]) / 2 : 0.06, 0.035), 0.16);
     const axisNode = axisTriad(axisLen);
     groups.axes.add(axisNode);
     objs.push({
-      name: o.name, uid: o.uid, node: poseNode, axisNode, centre: c, measured, size,
+      name: o.name, uid: o.uid, node: poseNode, axisNode, ptsNode, centre: c, measured, size,
       T: HOT3D.f32(o.T, 3), Q: HOT3D.f32(o.Q, 4),
       vis: HOT3D.f32(o.boxes.rgb.vis), travel: o.travel_m, framesWithPose: o.frames_with_pose,
       world: new THREE.Vector3(),
@@ -734,6 +764,7 @@ function setFrame(i, force) {
   setPose(headNode, hT, hQ, i);
   for (const o of objs) {
     if (o.axisNode) setPose(o.axisNode, o.T, o.Q, i);
+    if (o.ptsNode) setPose(o.ptsNode, o.T, o.Q, i);
     if (setPose(o.node, o.T, o.Q, i)) {
       o.world.set(o.centre[0], o.centre[1], o.centre[2]).applyQuaternion(o.node.quaternion).add(o.node.position);
       o.here = true;
