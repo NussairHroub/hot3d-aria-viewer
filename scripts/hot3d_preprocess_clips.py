@@ -30,8 +30,12 @@ import subprocess
 import tempfile
 
 FRAME = "rgb_WoArm_WArmObjKpts.png"     # the overlay the pipeline writes for each window frame
-WIDTH = 640                              # tile width on the page; the frames are 1920x1280 (3:2)
-CRF = 32
+# The overlay markers are thin saturated rings a few pixels wide. At 640 px (a 3x downscale)
+# they fall below what h264 can hold, and 4:2:0 chroma subsampling then bleeds their colour, so
+# the thing the page exists to show is the first thing the encoder throws away. 960 at crf 28
+# keeps them distinct and still covers a retina tile.
+WIDTH = 960
+CRF = 28
 FPS = 30
 OBJ_LINE = re.compile(r"\[GT masks\] obj\d+ = ([A-Za-z0-9_]+)")
 
@@ -81,7 +85,7 @@ def encode(frames: list[str], out: str, exe: str) -> None:
         subprocess.run(
             [exe, "-nostdin", "-v", "error", "-r", str(FPS), "-f", "concat", "-safe", "0",
              "-i", listing, "-vf", f"scale={WIDTH}:-2", "-c:v", "libx264", "-crf", str(CRF),
-             "-preset", "veryfast", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+             "-preset", "medium", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
              "-y", out],
             check=True)
     finally:
