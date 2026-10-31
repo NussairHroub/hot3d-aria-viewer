@@ -1,2 +1,5 @@
 .DS_Store
 .claude/
+
+# the ground-truth clips live on Hugging Face (Nussair1/hot3d-aria-gt-points)
+media/gtpoints/

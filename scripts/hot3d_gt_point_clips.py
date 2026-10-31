@@ -15,9 +15,13 @@ galleries pair tile for tile. The figure added per object is how often the relea
 that object is visible ACROSS THE WHOLE RECORDING -- much lower than over the window it was
 chosen in, and the honest answer to "why does this clip spend so long with no points on it".
 
+The clips are too large for the site's own 1 GB budget, so both tiers live on Hugging Face and
+the page streams them from there. This script records which files exist and how big they are, so
+a caption can offer the native file without the reader guessing what they are about to open.
+
 Usage:
     python3 scripts/hot3d_gt_point_clips.py <gt_archives_dir> data/preprocessing/clips.json \
-        media/gtpoints -o data/gtpoints/clips.json
+        <light_dir> --native-dir <native_dir> --base-url <url> -o data/gtpoints/clips.json
 """
 
 from __future__ import annotations
@@ -35,11 +39,12 @@ PROVENANCE = {
     "points_per_object": 20,
     "placement": "evenly spaced by arc length along the object's longest outline, per frame",
     "min_pixels": 30,
-    "extent": "the whole recording",
-    "stride": 3,
-    "encode": "640 px wide, libx264 crf 30, every 3rd frame at 30 fps (3x speed)",
+    "extent": "the whole recording, at real-time speed",
+    "stride": 1,
+    "encode": "light 960 px crf 28; native 1920x1280 crf 20; both 30 fps",
+    "hosting": "Hugging Face dataset Nussair1/hot3d-aria-gt-points",
 }
-STRIDE = 3
+STRIDE = 1
 FPS = 30
 
 
@@ -74,7 +79,9 @@ def main() -> None:
     ap.add_argument("preprocessing_index", help="data/preprocessing/clips.json")
     ap.add_argument("--site-index", default="data/index.json",
                     help="for each recording's true length")
-    ap.add_argument("media_dir", help="where the rendered clips are")
+    ap.add_argument("media_dir", help="the light-tier clips")
+    ap.add_argument("--native-dir", default="", help="the native-tier clips")
+    ap.add_argument("--base-url", default="", help="where both tiers are served from")
     ap.add_argument("-o", "--out", default="data/gtpoints/clips.json")
     ap.add_argument("--rendered", default="")
     a = ap.parse_args()
@@ -86,9 +93,11 @@ def main() -> None:
             length[r["seq"]] = (r["rgb_frames"], r["duration_s"])
     clips, missing = [], []
     for c in base["clips"]:
-        if not os.path.exists(os.path.join(a.media_dir, f"{c['rec']}.mp4")):
+        light = os.path.join(a.media_dir, f"{c['rec']}.mp4")
+        if not os.path.exists(light):
             missing.append(c["rec"])
             continue
+        native = os.path.join(a.native_dir, f"{c['rec']}.mp4") if a.native_dir else ""
         tracked = []
         for t in c.get("tracked", []):
             share = visible_share(a.archives, c["rec"], t["name"])
@@ -107,6 +116,9 @@ def main() -> None:
             "recording_frames": rec_frames,
             "duration_s": dur,
             "clip_seconds": None if rec_frames is None else round(rec_frames / STRIDE / FPS, 1),
+            "light_mb": round(os.path.getsize(light) / 1048576, 1),
+            "native_mb": (round(os.path.getsize(native) / 1048576, 1)
+                          if native and os.path.exists(native) else None),
             "window_frames": c["frames"],
             "window_start": c["start"],
             "window_end": c["end"],
@@ -122,8 +134,9 @@ def main() -> None:
 
     payload = {
         "schema_version": 1,
-        "view": "the whole recording in the rectified upright frame, at 3x speed, with twenty "
-                "ground-truth points per object placed on its outline in every frame",
+        "view": "the whole recording in the rectified upright frame, at real-time speed, with "
+                "twenty ground-truth points per object placed on its outline in every frame",
+        "base_url": a.base_url.rstrip("/"),
         "provenance": {**PROVENANCE, "rendered": rendered},
         "with_ground_truth": base.get("with_ground_truth"),
         "without_window": base.get("without_window"),
@@ -142,8 +155,14 @@ def main() -> None:
         print(f"  object visible over the whole recording: median {100 * float(np.median(vis)):.0f}%, "
               f"worst {100 * min(vis):.0f}%")
     if secs:
-        print(f"  clip length at 3x: median {float(np.median(secs)):.0f} s, "
+        print(f"  clip length: median {float(np.median(secs)):.0f} s, "
               f"longest {max(secs):.0f} s, total {sum(secs)/60:.0f} min")
+    lt = sum(c["light_mb"] for c in clips)
+    nt = sum(c["native_mb"] for c in clips if c["native_mb"])
+    n_native = sum(1 for c in clips if c["native_mb"])
+    print(f"  light tier: {lt/1024:.2f} GB over {len(clips)} clips")
+    print(f"  native tier: {nt/1024:.2f} GB over {n_native} clips"
+          + ("" if n_native == len(clips) else "  (INCOMPLETE)"))
 
 
 if __name__ == "__main__":

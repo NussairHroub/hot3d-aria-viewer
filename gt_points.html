@@ -52,17 +52,18 @@
   <div class="page-head">
     <p class="eyebrow">Ground truth, drawn the same way</p>
     <h1>Where the object points actually are, for the whole recording</h1>
-    <p class="lede">One clip per recording, start to finish, at three times speed — about two
-    minutes of footage in forty seconds. The twenty points per object are read from HOT3D's
-    ground-truth object map in every frame, so they are on the object by construction. The
-    <a href="preprocessing.html">preprocessing gallery</a> shows the same objects over the
-    manipulation window only, with the points tracked instead of read.</p>
+    <p class="lede">One clip per recording, start to finish, at real speed. The twenty points
+    per object are read from HOT3D's ground-truth object map in every frame, so they are on the
+    object by construction. Tiles stream a 960 px version; every caption links to the same
+    recording at full 1920×1280. The <a href="preprocessing.html">preprocessing gallery</a> shows
+    the same objects over the manipulation window only, with the points tracked instead of
+    read.</p>
   </div>
 
   <section class="figs" aria-label="The clips at a glance">
     <div class="fig"><div class="n" id="fClips">—</div><div class="k">recordings</div></div>
     <div class="fig"><div class="n" id="fFrames">—</div><div class="k">minutes of footage</div></div>
-    <div class="fig"><div class="n" id="fMed">—</div><div class="k">median clip, seconds at 3×</div></div>
+    <div class="fig"><div class="n" id="fMed">—</div><div class="k">median recording, seconds</div></div>
     <div class="fig"><div class="n" id="fPart">—</div><div class="k">participants</div></div>
     <div class="fig"><div class="n" id="fObj">—</div><div class="k">objects outlined</div></div>
   </section>
@@ -111,12 +112,13 @@
     harder thing to track than a textured patch in the middle of a face.</p>
   </div>
   <div class="caveat">
-    <h3>Three times speed, every third frame</h3>
-    <p>A recording runs about two minutes. At full rate these 119 clips would be four hours of
-    video and roughly two gigabytes, which is more than a static site can serve. Every third
-    frame is kept and played at thirty, so each tile shows the whole recording in about forty
-    seconds. Motion is correspondingly jumpier, and a point that appears for under a tenth of a
-    second may not appear at all.</p>
+    <h3>Two tiers, both hosted off this site</h3>
+    <p>At 1920×1280 these 119 recordings come to about 34 GB, and GitHub Pages serves no site
+    over 1 GB, so both tiers live in a
+    <a href="https://huggingface.co/datasets/Nussair1/hot3d-aria-gt-points">Hugging Face dataset
+    repository</a>. Tiles stream the 960 px version because nine of them playing at native rate
+    would need roughly 180 Mbps to browse; each caption links to that recording's native file,
+    which is the render with no downscaling at all.</p>
   </div>
   <div class="caveat">
     <h3>The object is often not in view</h3>
@@ -148,12 +150,14 @@
 </main>
 
 <script>
-HOT3D.init('Points on this page are read from the release\'s own annotations; only the window and object selection come from a preprocessing run.');
+HOT3D.init('Points on this page are read from the release\'s own annotations; only the object selection comes from a preprocessing run. Clips are served from Hugging Face, not from this site.');
 
 (function () {
 const $ = (id) => document.getElementById(id);
 const f = HOT3D.fmt;
 const grid = $('grid');
+// both tiers are hosted off-site: 34 GB of native clips will not fit a 1 GB Pages budget
+let BASE = '';
 const state = { playing: true, part: '', obj: '' };
 let CLIPS = [];
 let cells = [];
@@ -182,7 +186,8 @@ function build() {
     const v = document.createElement('video');
     v.muted = true; v.loop = true; v.playsInline = true; v.controls = true;
     v.preload = 'none';
-    v.src = `media/gtpoints/${c.rec}.mp4`;
+    v.src = `${BASE}/light/${c.rec}.mp4`;
+    v.crossOrigin = 'anonymous';
     v.playbackRate = Number($('gSpeed').value) || 1;
     // data values are untrusted text: set them as attributes and text, never as markup
     v.setAttribute('aria-label',
@@ -198,9 +203,26 @@ function build() {
     const n = document.createElement('span');
     n.className = 'n';
     const mm = Math.floor((c.duration_s || 0) / 60), ss = Math.round((c.duration_s || 0) % 60);
-    n.textContent = `${mm}:${String(ss).padStart(2, '0')} in ${Math.round(c.clip_seconds || 0)} s`;
+    n.textContent = `${mm}:${String(ss).padStart(2, '0')}`;
     top.append(b, n);
     cap.append(top);
+
+    if (c.native_mb) {
+      const row = document.createElement('div');
+      row.className = 'obj';
+      const lab = document.createElement('span');
+      lab.className = 'name';
+      const link = document.createElement('a');
+      link.href = `${BASE}/native/${c.rec}.mp4`;
+      link.textContent = 'native 1920×1280';
+      link.rel = 'noopener';
+      lab.append(link);
+      const sz = document.createElement('span');
+      sz.className = 'prompt';
+      sz.textContent = `${Math.round(c.native_mb)} MB`;
+      row.append(lab, sz);
+      cap.append(row);
+    }
 
     // one row per object outlined in this window
     for (const t of (c.tracked || [])) {
@@ -247,16 +269,18 @@ function fillFigures() {
 
 HOT3D.json('data/gtpoints/clips.json').then((payload) => {
   CLIPS = payload.clips;
+  BASE = payload.base_url || '';
   fillFigures();
   build();
   const p = payload.provenance;
   $('prov').textContent =
-    `${f.n(CLIPS.length)} whole recordings, rendered ${p.rendered} at ${p.encode}. Each ` +
-    `frame's points come from the ground-truth object map at that instant: the object's pixels ` +
-    `are resampled into the rectified frame, the longest outline is taken, and twenty points ` +
-    `are spaced evenly along it by arc length. Object selection matches the preprocessing ` +
-    `gallery, so the ${payload.without_window} recordings that produced no manipulation window ` +
-    `have no clip here either. Built by scripts/hot3d_gt_point_clips.py.`;
+    `${f.n(CLIPS.length)} whole recordings at real speed, rendered ${p.rendered}: ${p.encode}. ` +
+    `Each frame's points come from the ground-truth object map at that instant: the object's ` +
+    `pixels are resampled into the rectified frame, the longest outline is taken, and twenty ` +
+    `points are spaced evenly along it by arc length. Hosted at ${p.hosting}; this site carries ` +
+    `only the index. Object selection matches the preprocessing gallery, so the ` +
+    `${payload.without_window} recordings that produced no manipulation window have no clip ` +
+    `here either. Built by scripts/hot3d_gt_point_clips.py.`;
 }).catch((err) => {
   $('prov').textContent = `Could not load data/gtpoints/clips.json: ${err.message}`;
 });
