@@ -19,7 +19,6 @@ const HOT3D = (() => {
     ['scene3d.html', '3D scene'],
     ['hands.html', 'Hands'],
     ['trackers.html', 'Hand trackers'],
-    ['humanego.html', 'HumanEgo keypoints'],
     ['objects.html', 'Objects'],
     ['cameras.html', 'Cameras'],
     ['gaze.html', 'Eye gaze'],
