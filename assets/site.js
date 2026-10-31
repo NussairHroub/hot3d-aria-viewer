@@ -20,6 +20,7 @@ const HOT3D = (() => {
     ['hands.html', 'Hands'],
     ['trackers.html', 'Hand trackers'],
     ['preprocessing.html', 'Preprocessing'],
+    ['gt_points.html', 'Ground-truth points'],
     ['objects.html', 'Objects'],
     ['cameras.html', 'Cameras'],
     ['gaze.html', 'Eye gaze'],

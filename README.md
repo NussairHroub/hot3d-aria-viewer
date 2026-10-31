@@ -28,6 +28,7 @@ directories carries its own `LICENSE`; the details are in [`DATA_LICENSE.md`](DA
 | `data.html` | What a recording folder holds and how this site was built from it |
 | `trackers.html` | MediaPipe, WiLoR and HaMeR scored against the mocap hands |
 | `preprocessing.html` | Each manipulation window, rectified upright, with the tracked points drawn on |
+| `gt_points.html` | The same windows with the object points read from the annotation in every frame |
 
 ## Layout
 
@@ -42,9 +43,11 @@ data/objects/*.glb     object models, compacted for the web
 data/objects/points.json  400 surface points per model, for the 3D scene's object-point layer
 media/<SEQ>_rgb.mp4    704x704 H.264, 30 fps — frame i is row i of every payload array
 media/<SEQ>_*.jpg      poster frame and SLAM-camera stills
-media/preprocess/<SEQ>.mp4   the manipulation window with the tracked points drawn on, 640 px wide
+media/preprocess/<SEQ>.mp4   the manipulation window with the tracked points drawn on, 960 px wide
+media/gtpoints/<SEQ>.mp4     the same window with ground-truth outline points, 960 px wide
 data/trackers/*.json   hand-tracker scores, one file per tracker (see its SCHEMA.md)
 data/preprocessing/clips.json  the clip index: frames, window bounds and objects per recording
+data/gtpoints/clips.json     the ground-truth clip index, with each object's visible share
 scripts/               the extraction pipeline (runs where the dataset is, not in the browser)
 ```
 
@@ -81,6 +84,13 @@ python scripts/hot3d_preprocess_clips.py <runs_dir> <seqs.txt> media/preprocess 
 It encodes each recording's window frames into one clip and writes the index the page reads. It
 needs `imageio-ffmpeg` (or ffmpeg on PATH).
 
+The ground-truth clips are rendered the same way but from the annotation rather than the
+pipeline's overlay, and indexed with:
+
+```bash
+python scripts/hot3d_gt_point_clips.py <gt_archives> data/preprocessing/clips.json media/gtpoints -o data/gtpoints/clips.json
+```
+
 `hot3d_extract.py` needs numpy; `hot3d_media.py` needs `projectaria-tools`, Pillow and ffmpeg
 (`imageio-ffmpeg` supplies a build with libx264); `hot3d_objects.py` needs trimesh,
 `fast-simplification` and Pillow on Python 3.10+. `hot3d_object_points.py` needs only numpy — it
@@ -95,7 +105,7 @@ reproducing each model's released `extent_m` (worst disagreement across the 33 m
 | `media/`, `data/seq/`, `data/index.json` | CC BY-SA 4.0 |
 | `data/hands/` | CC BY-NC-SA 4.0 — non-commercial |
 | `data/objects/` | CC BY-SA 4.0, and the models may not be sold |
-| `media/preprocess/`, `data/preprocessing/`, `data/trackers/` | CC BY-SA 4.0 — derived from the release's video and annotations |
+| `media/preprocess/`, `media/gtpoints/`, `data/preprocessing/`, `data/gtpoints/`, `data/trackers/` | CC BY-SA 4.0 — derived from the release's video and annotations |
 
 Hand annotations sit in their own directory because the release licenses them differently, and one
 file cannot carry both terms. MANO parameters are not republished here; their use is gated by the
