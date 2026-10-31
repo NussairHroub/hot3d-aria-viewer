@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Ground-truth points · HOT3D Aria</title>
-<meta name="description" content="The same windows as the preprocessing gallery, with twenty points taken from HOT3D's ground-truth object map in every frame instead of tracked from one reference frame.">
+<meta name="description" content="Every annotated HOT3D Aria recording in full, at 3x speed, with twenty points per object taken from the ground-truth object map in every frame.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -51,18 +51,18 @@
 <main class="wrap">
   <div class="page-head">
     <p class="eyebrow">Ground truth, drawn the same way</p>
-    <h1>Where the object points actually are, in every frame</h1>
-    <p class="lede">The same windows and the same objects as the
-    <a href="preprocessing.html">preprocessing gallery</a>, with one thing changed: these twenty
-    points per object are read from HOT3D's ground-truth object map in each frame rather than
-    chosen once and tracked. They are on the object by construction, in every frame, so this is
-    what a perfect tracker would have produced — the reference the tracked version is missing.</p>
+    <h1>Where the object points actually are, for the whole recording</h1>
+    <p class="lede">One clip per recording, start to finish, at three times speed — about two
+    minutes of footage in forty seconds. The twenty points per object are read from HOT3D's
+    ground-truth object map in every frame, so they are on the object by construction. The
+    <a href="preprocessing.html">preprocessing gallery</a> shows the same objects over the
+    manipulation window only, with the points tracked instead of read.</p>
   </div>
 
   <section class="figs" aria-label="The clips at a glance">
     <div class="fig"><div class="n" id="fClips">—</div><div class="k">recordings</div></div>
-    <div class="fig"><div class="n" id="fFrames">—</div><div class="k">frames across all windows</div></div>
-    <div class="fig"><div class="n" id="fMed">—</div><div class="k">median window, seconds</div></div>
+    <div class="fig"><div class="n" id="fFrames">—</div><div class="k">minutes of footage</div></div>
+    <div class="fig"><div class="n" id="fMed">—</div><div class="k">median clip, seconds at 3×</div></div>
     <div class="fig"><div class="n" id="fPart">—</div><div class="k">participants</div></div>
     <div class="fig"><div class="n" id="fObj">—</div><div class="k">objects outlined</div></div>
   </section>
@@ -111,11 +111,21 @@
     harder thing to track than a textured patch in the middle of a face.</p>
   </div>
   <div class="caveat">
-    <h3>Same objects as the pipeline run, including its choices</h3>
-    <p>Each window outlines the objects the preprocessing run selected for it, so the two
-    galleries line up tile for tile. Where that run picked something other than the object being
-    manipulated, this page inherits the same choice — the points will sit perfectly on an object
-    nobody is touching.</p>
+    <h3>Three times speed, every third frame</h3>
+    <p>A recording runs about two minutes. At full rate these 119 clips would be four hours of
+    video and roughly two gigabytes, which is more than a static site can serve. Every third
+    frame is kept and played at thirty, so each tile shows the whole recording in about forty
+    seconds. Motion is correspondingly jumpier, and a point that appears for under a tenth of a
+    second may not appear at all.</p>
+  </div>
+  <div class="caveat">
+    <h3>The object is often not in view</h3>
+    <p>Each recording outlines the objects the preprocessing run selected, so the two galleries
+    pair tile for tile — but that choice was made inside a short manipulation window, and over a
+    whole recording the wearer looks away, walks around and handles other things. The caption
+    gives the share of the recording in which the release says each object is visible; outside
+    that share there is nothing to draw, and where the run picked something other than the object
+    being handled, the points sit perfectly on an object nobody touches.</p>
   </div>
   <div class="caveat">
     <h3>No hands here</h3>
@@ -132,8 +142,8 @@
 
   <h2>Where the clips came from</h2>
   <p class="note" id="prov">Loading…</p>
-  <p class="note">Related: <a href="preprocessing.html">the same windows with the tracked
-  points</a> · <a href="sequence.html">the raw video with its annotations</a> ·
+  <p class="note">Related: <a href="preprocessing.html">the manipulation windows with the
+  tracked points</a> · <a href="sequence.html">the raw video with its annotations</a> ·
   <a href="data.html">what a recording folder holds</a>.</p>
 </main>
 
@@ -176,7 +186,8 @@ function build() {
     v.playbackRate = Number($('gSpeed').value) || 1;
     // data values are untrusted text: set them as attributes and text, never as markup
     v.setAttribute('aria-label',
-      `${c.rec}, ${c.frames} frames, ground-truth points on ${c.objects.join(' and ') || 'nothing'}`);
+      `${c.rec}, the whole recording at 3 times speed, ground-truth points on ` +
+      `${c.objects.join(' and ') || 'nothing'}`);
 
     const cap = document.createElement('div');
     cap.className = 'cap';
@@ -186,7 +197,8 @@ function build() {
     b.textContent = c.rec;
     const n = document.createElement('span');
     n.className = 'n';
-    n.textContent = `${f.n(c.frames)} frames`;
+    const mm = Math.floor((c.duration_s || 0) / 60), ss = Math.round((c.duration_s || 0) % 60);
+    n.textContent = `${mm}:${String(ss).padStart(2, '0')} in ${Math.round(c.clip_seconds || 0)} s`;
     top.append(b, n);
     cap.append(top);
 
@@ -201,7 +213,7 @@ function build() {
       seen.className = 'prompt';
       // the release's own visibility flag: the clip can only draw the object while it is in view
       seen.textContent = t.visible_share === null || t.visible_share === undefined ? ''
-        : `visible in ${Math.round(100 * t.visible_share)}% of the window`;
+        : `visible in ${Math.round(100 * t.visible_share)}% of the recording`;
       row.append(name, seen);
       cap.append(row);
     }
@@ -219,13 +231,13 @@ function build() {
 }
 
 function fillFigures() {
-  const frames = CLIPS.reduce((a, c) => a + c.frames, 0);
-  const secs = CLIPS.map((c) => c.frames / 30).sort((a, b) => a - b);
+  const mins = CLIPS.reduce((a, c) => a + (c.duration_s || 0), 0) / 60;
+  const secs = CLIPS.map((c) => c.clip_seconds || 0).filter(Boolean).sort((a, b) => a - b);
   const parts = [...new Set(CLIPS.map((c) => c.participant))].sort();
   const objs = [...new Set(CLIPS.flatMap((c) => c.objects))].sort();
   $('fClips').textContent = f.n(CLIPS.length);
-  $('fFrames').textContent = f.n(frames);
-  $('fMed').textContent = secs.length ? secs[Math.floor(secs.length / 2)].toFixed(1) : '—';
+  $('fFrames').textContent = f.n(Math.round(mins));
+  $('fMed').textContent = secs.length ? secs[Math.floor(secs.length / 2)].toFixed(0) : '—';
   $('fPart').textContent = parts.length;
   $('fObj').textContent = objs.length;
 
@@ -239,12 +251,12 @@ HOT3D.json('data/gtpoints/clips.json').then((payload) => {
   build();
   const p = payload.provenance;
   $('prov').textContent =
-    `${f.n(CLIPS.length)} clips, rendered ${p.rendered} at ${p.encode}. Each frame's points ` +
-    `come from the ground-truth object map at that instant: the object's pixels are resampled ` +
-    `into the rectified frame, the longest outline is taken, and twenty points are spaced ` +
-    `evenly along it by arc length. Windows and objects match the preprocessing gallery, so ` +
-    `the ${payload.without_window} recordings without a window have no clip here either. ` +
-    `Built by scripts/hot3d_gt_point_clips.py, which runs where the rendered maps live.`;
+    `${f.n(CLIPS.length)} whole recordings, rendered ${p.rendered} at ${p.encode}. Each ` +
+    `frame's points come from the ground-truth object map at that instant: the object's pixels ` +
+    `are resampled into the rectified frame, the longest outline is taken, and twenty points ` +
+    `are spaced evenly along it by arc length. Object selection matches the preprocessing ` +
+    `gallery, so the ${payload.without_window} recordings that produced no manipulation window ` +
+    `have no clip here either. Built by scripts/hot3d_gt_point_clips.py.`;
 }).catch((err) => {
   $('prov').textContent = `Could not load data/gtpoints/clips.json: ${err.message}`;
 });

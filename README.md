@@ -28,7 +28,7 @@ directories carries its own `LICENSE`; the details are in [`DATA_LICENSE.md`](DA
 | `data.html` | What a recording folder holds and how this site was built from it |
 | `trackers.html` | MediaPipe, WiLoR and HaMeR scored against the mocap hands |
 | `preprocessing.html` | Each manipulation window, rectified upright, with the tracked points drawn on |
-| `gt_points.html` | The same windows with the object points read from the annotation in every frame |
+| `gt_points.html` | Each recording in full at 3x speed, object points read from the annotation each frame |
 
 ## Layout
 
@@ -44,10 +44,10 @@ data/objects/points.json  400 surface points per model, for the 3D scene's objec
 media/<SEQ>_rgb.mp4    704x704 H.264, 30 fps — frame i is row i of every payload array
 media/<SEQ>_*.jpg      poster frame and SLAM-camera stills
 media/preprocess/<SEQ>.mp4   the manipulation window with the tracked points drawn on, 960 px wide
-media/gtpoints/<SEQ>.mp4     the same window with ground-truth outline points, 960 px wide
+media/gtpoints/<SEQ>.mp4     the whole recording with ground-truth outline points, 640 px, 3x speed
 data/trackers/*.json   hand-tracker scores, one file per tracker (see its SCHEMA.md)
 data/preprocessing/clips.json  the clip index: frames, window bounds and objects per recording
-data/gtpoints/clips.json     the ground-truth clip index, with each object's visible share
+data/gtpoints/clips.json     the ground-truth clip index: recording length and each object's visible share
 scripts/               the extraction pipeline (runs where the dataset is, not in the browser)
 ```
 
