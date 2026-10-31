@@ -26,6 +26,11 @@ directories carries its own `LICENSE`; the details are in [`DATA_LICENSE.md`](DA
 | `gaze.html` | Yaw, pitch, depth and vergence |
 | `quality.html` | The seven masks, per recording and across the release |
 | `data.html` | What a recording folder holds and how this site was built from it |
+| `trackers.html` | MediaPipe, WiLoR and HaMeR scored against the mocap hands |
+| `humanego.html` | HumanEgo's triangulated object keypoints scored against the mocap surfaces |
+
+The last two measure an estimation method against the release; every other page republishes the
+release itself.
 
 ## Layout
 
@@ -38,6 +43,8 @@ data/hands/<SEQ>.hands.json  hand annotations, licensed separately (non-commerci
 data/objects.json      the object library index
 data/objects/*.glb     object models, compacted for the web
 data/objects/points.json  400 surface points per model, for the 3D scene's object-point layer
+data/trackers/*.json   hand-tracker scores, one file per tracker (see its SCHEMA.md)
+data/humanego/scores.json  HumanEgo keypoint scores, aggregated (see its SCHEMA.md)
 media/<SEQ>_rgb.mp4    704x704 H.264, 30 fps — frame i is row i of every payload array
 media/<SEQ>_*.jpg      poster frame and SLAM-camera stills
 scripts/               the extraction pipeline (runs where the dataset is, not in the browser)
@@ -66,6 +73,15 @@ python scripts/hot3d_objects.py <dataset_dir>/assets/assets data/index.json data
 python scripts/hot3d_object_points.py data/objects.json data/objects data/objects/points.json
 ```
 
+The two measurement pages are built from scoring runs that happen where the recordings live, not
+from the release alone. `scripts/humanego_scores.py` turns that run's CSV output into the payload
+`humanego.html` reads; it aggregates and re-estimates nothing, and `data/humanego/SCHEMA.md`
+records what was measured and what the figures do not cover.
+
+```bash
+python scripts/humanego_scores.py <dir with the scorer's CSVs> -o data/humanego/scores.json
+```
+
 `hot3d_extract.py` needs numpy; `hot3d_media.py` needs `projectaria-tools`, Pillow and ffmpeg
 (`imageio-ffmpeg` supplies a build with libx264); `hot3d_objects.py` needs trimesh,
 `fast-simplification` and Pillow on Python 3.10+. `hot3d_object_points.py` needs only numpy — it
@@ -80,6 +96,7 @@ reproducing each model's released `extent_m` (worst disagreement across the 33 m
 | `media/`, `data/seq/`, `data/index.json` | CC BY-SA 4.0 |
 | `data/hands/` | CC BY-NC-SA 4.0 — non-commercial |
 | `data/objects/` | CC BY-SA 4.0, and the models may not be sold |
+| `data/trackers/`, `data/humanego/` | CC BY-SA 4.0 — aggregate scores derived from the object and hand annotations |
 
 Hand annotations sit in their own directory because the release licenses them differently, and one
 file cannot carry both terms. MANO parameters are not republished here; their use is gated by the
