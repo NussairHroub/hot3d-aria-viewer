@@ -28,10 +28,18 @@
   .cell { background: var(--surface); border: 1px solid var(--line);
           border-radius: var(--radius); overflow: hidden; min-width: 0; }
   .cell video { display: block; width: 100%; aspect-ratio: 3 / 2; background: #0b0e11; }
-  .cap { display: flex; justify-content: space-between; gap: 10px;
-         padding: 8px 12px; font-size: 12.5px; color: var(--muted); }
+  .cap { padding: 8px 12px 9px; font-size: 12.5px; color: var(--muted);
+         display: grid; gap: 3px; min-width: 0; }
+  .cap .top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
   .cap b { color: var(--ink); font-family: var(--mono); font-size: 12.5px; font-weight: 500; }
-  .cap .obj { text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cap .n { white-space: nowrap; }
+  .obj { display: grid; grid-template-columns: auto 1fr; gap: 6px; align-items: baseline; min-width: 0; }
+  .obj .name { color: var(--ink-2); white-space: nowrap; }
+  .obj .prompt { font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* a prompt that names something other than the object tracked under its key */
+  .obj.off .prompt { color: var(--warn); }
+  .obj.off .name::after { content: " ≠"; color: var(--warn); }
   .empty { color: var(--muted); font-size: 13.5px; padding: 28px 0; }
   .caveat { border-left: 3px solid var(--line-2); padding: 2px 0 2px 14px; margin: 0 0 12px; }
   .caveat h3 { margin: 0 0 4px; }
@@ -101,6 +109,17 @@
     object, and some windows carry two objects.</p>
   </div>
   <div class="caveat">
+    <h3>The prompt under each object is the one its key was configured with</h3>
+    <p>Each caption lists what the window tracks and, beside it, the text prompt the detector was
+    configured with for that object slot. The two do not always agree: the mask stage numbers its
+    slots by how much of each object is visible, while the config assigned prompts to those same
+    slots in the recording's own object order, and the orderings differ.
+    <b id="misN">—</b> of <b id="trkN">—</b> tracked objects sit under a prompt that names
+    something else; those are marked ≠. The masks themselves come from the ground-truth object
+    maps rather than from the detector, so a mismatched prompt did not pick the wrong object
+    here — but it would if the pipeline were re-run with the detector doing the finding.</p>
+  </div>
+  <div class="caveat">
     <h3>The arm was not inpainted away in this run</h3>
     <p>The pipeline has a stage that segments the wearer's forearm out and paints over it, so the
     scene looks as a robot would see it. On HOT3D it had almost no effect: for 117 of the 119
@@ -159,16 +178,35 @@ function build() {
     v.src = `media/preprocess/${c.rec}.mp4`;
     v.playbackRate = Number($('gSpeed').value) || 1;
     // data values are untrusted text: set them as attributes and text, never as markup
-    v.setAttribute('aria-label', `${c.rec}, ${c.frames} frames, ${c.objects.join(' and ')}`);
+    v.setAttribute('aria-label',
+      `${c.rec}, ${c.frames} frames, tracking ${c.objects.join(' and ') || 'nothing'}`);
 
     const cap = document.createElement('div');
     cap.className = 'cap';
+    const top = document.createElement('div');
+    top.className = 'top';
     const b = document.createElement('b');
     b.textContent = c.rec;
-    const s = document.createElement('span');
-    s.className = 'obj';
-    s.textContent = `${f.n(c.frames)} frames · ${c.objects.join(', ')}`;
-    cap.append(b, s);
+    const n = document.createElement('span');
+    n.className = 'n';
+    n.textContent = `${f.n(c.frames)} frames`;
+    top.append(b, n);
+    cap.append(top);
+
+    // one row per tracked object: what was tracked, and the prompt its key was configured with
+    for (const t of (c.tracked || [])) {
+      const row = document.createElement('div');
+      row.className = t.matches === false ? 'obj off' : 'obj';
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = t.name;
+      const prompt = document.createElement('span');
+      prompt.className = 'prompt';
+      prompt.textContent = t.prompt ? `"${t.prompt.replace(/\s*\.\s*$/, '')}"` : '—';
+      prompt.title = t.prompt || 'no prompt in the config';
+      row.append(name, prompt);
+      cap.append(row);
+    }
 
     cell.append(v, cap);
     grid.append(cell);
@@ -201,6 +239,8 @@ HOT3D.json('data/preprocessing/clips.json').then((payload) => {
   CLIPS = payload.clips;
   fillFigures();
   build();
+  $('misN').textContent = f.n(payload.prompt_mismatches);
+  $('trkN').textContent = f.n(payload.tracked_objects);
   const p = payload.provenance;
   $('prov').textContent =
     `${f.n(CLIPS.length)} clips from the preprocessing run of ${p.run_date} ` +

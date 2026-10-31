@@ -29,6 +29,11 @@ import re
 import subprocess
 import tempfile
 
+try:
+    import yaml
+except ImportError:                      # the prompts are then simply absent from the index
+    yaml = None
+
 FRAME = "rgb_WoArm_WArmObjKpts.png"     # the overlay the pipeline writes for each window frame
 # The overlay markers are thin saturated rings a few pixels wide. At 640 px (a 3x downscale)
 # they fall below what h264 can hold, and 4:2:0 chroma subsampling then bleeds their colour, so
@@ -37,7 +42,9 @@ FRAME = "rgb_WoArm_WArmObjKpts.png"     # the overlay the pipeline writes for ea
 WIDTH = 960
 CRF = 28
 FPS = 30
-OBJ_LINE = re.compile(r"\[GT masks\] obj\d+ = ([A-Za-z0-9_]+)")
+OBJ_LINE = re.compile(r"\[GT masks\] (obj\d+) = ([A-Za-z0-9_]+)")
+# words that carry no identity, so their presence should not count as a prompt matching an object
+STOP = {"a", "an", "the", "of", "bag"}
 
 PROVENANCE = {
     "run_date": "2026-10-31",
@@ -55,8 +62,8 @@ def ffmpeg_exe() -> str:
         return "ffmpeg"
 
 
-def objects_of(logs_dir: str, task: int) -> list[str]:
-    """What the mask-writing stage said it drew, from the newest job log for this task."""
+def objects_of(logs_dir: str, task: int) -> list[tuple[str, str]]:
+    """(key, object) pairs the mask-writing stage said it drew, from this task's newest log."""
     best, best_t = None, -1.0
     for p in glob.glob(os.path.join(logs_dir, f"s2_*_{task}.out")):
         try:
@@ -72,6 +79,21 @@ def objects_of(logs_dir: str, task: int) -> list[str]:
         if "[GT masks] obj" in txt:
             best, best_t = txt, t
     return OBJ_LINE.findall(best) if best else []
+
+
+def prompts_of(runs_dir: str, rec: str) -> dict:
+    """The text prompts the run was configured with, per object key, from its DINOSAM config."""
+    p = os.path.join(runs_dir, rec, "preprocess", "cfg", "DINOSAM.yaml")
+    if yaml is None or not os.path.exists(p):
+        return {}
+    try:
+        return (yaml.safe_load(open(p)) or {}).get("dinosam_prompt") or {}
+    except Exception:
+        return {}
+
+
+def words(s: str) -> set:
+    return {w for w in re.findall(r"[a-z0-9]+", s.lower().replace("_", " "))} - STOP
 
 
 def encode(frames: list[str], out: str, exe: str) -> None:
@@ -116,13 +138,30 @@ def main() -> None:
         if not a.no_encode and not os.path.exists(out):
             encode(frames, out, exe)
         idx = [int(os.path.basename(os.path.dirname(p))) for p in frames]
+        prompts = prompts_of(a.runs_dir, rec)
+        # The mask stage assigns obj1, obj2 ... by how much of each object is visible, while the
+        # config assigned its prompts to those same keys in the recording's own object order. The
+        # two orderings disagree often enough that the pairing is reported, not assumed: a prompt
+        # shown beside an object is the prompt configured for that KEY, which may describe
+        # something else entirely.
+        tracked = []
+        for key, name in objects_of(logs, task):
+            prompt = prompts.get(key, "")
+            tracked.append({
+                "key": key,
+                "name": name,
+                "prompt": prompt,
+                "matches": bool(words(name) & words(prompt)) if prompt else None,
+            })
         clips.append({
             "rec": rec,
             "participant": rec.split("_")[0],
             "frames": len(frames),
             "start": idx[0],
             "end": idx[-1],
-            "objects": objects_of(logs, task),
+            "objects": [t["name"] for t in tracked],
+            "tracked": tracked,
+            "arm_prompt": prompts.get("arm", ""),
         })
 
     if a.rendered:
@@ -138,6 +177,8 @@ def main() -> None:
         "provenance": {**PROVENANCE, "rendered": rendered},
         "with_ground_truth": len(seqs),
         "without_window": len(skipped),
+        "tracked_objects": sum(len(c["tracked"]) for c in clips),
+        "prompt_mismatches": sum(1 for c in clips for t in c["tracked"] if t["matches"] is False),
         "clips": clips,
     }
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
@@ -150,6 +191,9 @@ def main() -> None:
     missing = [c["rec"] for c in clips if not c["objects"]]
     if missing:
         print(f"  no object list in the log for {len(missing)}: {missing[:5]}")
+    mis = payload["prompt_mismatches"]
+    print(f"  tracked objects: {payload['tracked_objects']}, of which {mis} have a key whose "
+          f"configured prompt shares no word with the object tracked under it")
 
 
 if __name__ == "__main__":
