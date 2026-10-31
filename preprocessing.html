@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Preprocessing · HOT3D Aria</title>
+<meta name="description" content="Every annotated HOT3D Aria recording put through the HumanEgo preprocessing pipeline: the rectified upright view over each manipulation window, with the tracked object keypoints and hand landmarks drawn on.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+<style>
+  /* the control bar sits under the site header, which is itself sticky at 0 */
+  .gbar {
+    position: sticky; top: 47px; z-index: 20;
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+    margin: 0 -20px 18px; padding: 10px 20px;
+    display: flex; gap: 12px; flex-wrap: wrap; align-items: center;
+    font-size: 13px;
+  }
+  .gbar .lab { font-family: var(--mono); font-size: 11.5px; letter-spacing: .06em;
+               text-transform: uppercase; color: var(--muted); }
+  .gbar .count { margin-left: auto; color: var(--muted); font-family: var(--mono); font-size: 12px; }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
+  .cell { background: var(--surface); border: 1px solid var(--line);
+          border-radius: var(--radius); overflow: hidden; min-width: 0; }
+  .cell video { display: block; width: 100%; aspect-ratio: 3 / 2; background: #0b0e11; }
+  .cap { display: flex; justify-content: space-between; gap: 10px;
+         padding: 8px 12px; font-size: 12.5px; color: var(--muted); }
+  .cap b { color: var(--ink); font-family: var(--mono); font-size: 12.5px; font-weight: 500; }
+  .cap .obj { text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .empty { color: var(--muted); font-size: 13.5px; padding: 28px 0; }
+  .caveat { border-left: 3px solid var(--line-2); padding: 2px 0 2px 14px; margin: 0 0 12px; }
+  .caveat h3 { margin: 0 0 4px; }
+  .caveat p { margin: 0; color: var(--ink-2); font-size: 14px; max-width: 72ch; }
+  @media (max-width: 720px) { .gbar { top: 0; } }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div class="page-head">
+    <p class="eyebrow">Preprocessed for manipulation learning</p>
+    <h1>Every annotated recording, with the tracked points drawn on</h1>
+    <p class="lede">The 136 recordings that ship ground truth, put through the HumanEgo
+    preprocessing pipeline. Each clip is one recording's manipulation window in the rectified
+    upright frame the pipeline works in, with the twenty tracked object keypoints and the hand
+    landmarks drawn on top — the view the training data is cut from, rather than the raw fisheye
+    video.</p>
+  </div>
+
+  <section class="figs" aria-label="The clips at a glance">
+    <div class="fig"><div class="n" id="fClips">—</div><div class="k">recordings with a window</div></div>
+    <div class="fig"><div class="n" id="fFrames">—</div><div class="k">frames across all windows</div></div>
+    <div class="fig"><div class="n" id="fMed">—</div><div class="k">median window, seconds</div></div>
+    <div class="fig"><div class="n" id="fPart">—</div><div class="k">participants</div></div>
+    <div class="fig"><div class="n" id="fObj">—</div><div class="k">objects tracked</div></div>
+  </section>
+
+  <div class="gbar">
+    <span class="lab">all clips</span>
+    <button class="btn" id="gPlay" aria-pressed="true">⏸ pause all</button>
+    <button class="btn" id="gRestart">⟲ restart all</button>
+    <label class="field" style="flex-direction:row;align-items:center;gap:6px">
+      <span class="lab">speed</span>
+      <select id="gSpeed">
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="1.5">1.5×</option>
+        <option value="2">2×</option>
+      </select>
+    </label>
+    <label class="field" style="flex-direction:row;align-items:center;gap:6px">
+      <span class="lab">participant</span>
+      <select id="gPart"><option value="">all</option></select>
+    </label>
+    <label class="field" style="flex-direction:row;align-items:center;gap:6px">
+      <span class="lab">object</span>
+      <select id="gObj"><option value="">all</option></select>
+    </label>
+    <span class="count" id="gCount">—</span>
+  </div>
+
+  <div class="grid" id="grid"></div>
+  <p class="empty" id="empty" hidden>No recording matches both filters.</p>
+
+  <h2>What you are looking at</h2>
+  <div class="caveat">
+    <h3>The window, not the recording</h3>
+    <p>The pipeline picks one manipulation window per recording from the hand trajectories, and
+    only that stretch is processed. A clip is therefore much shorter than its recording, and the
+    wearer still looks around inside it — a window is chosen on when the hands are doing something,
+    not on whether the object stays in view.</p>
+  </div>
+  <div class="caveat">
+    <h3>The coloured rings are the tracked object points</h3>
+    <p>Twenty points are placed around the object's outline in a reference frame and tracked
+    through the window; the pale dots on the hands are the hand landmarks. One ring colour per
+    object, and some windows carry two objects.</p>
+  </div>
+  <div class="caveat">
+    <h3>The arm was not inpainted away in this run</h3>
+    <p>The pipeline has a stage that segments the wearer's forearm out and paints over it, so the
+    scene looks as a robot would see it. On HOT3D it had almost no effect: for 117 of the 119
+    windows the inpainted frame is byte-identical to the one before it, because the arm prompt
+    found nothing to remove. These clips are the output as produced, arm included.</p>
+  </div>
+  <div class="caveat">
+    <h3>The frame is rectified and rolled upright</h3>
+    <p>Aria's RGB camera is a 1408×1408 fisheye mounted rotated. The pipeline rectifies it to a
+    1920×1280 pinhole at 90° field of view and turns it upright, which is why these frames are
+    landscape and straight while the raw video on the other pages is square and rotated.</p>
+  </div>
+
+  <h2>Where the clips came from</h2>
+  <p class="note" id="prov">Loading…</p>
+  <p class="note">Related: <a href="sequence.html">the raw video with its annotations</a> ·
+  <a href="recordings.html">all 198 recordings</a> ·
+  <a href="data.html">what a recording folder holds</a>.</p>
+</main>
+
+<script>
+HOT3D.init('Clips on this page are rendered from a preprocessing run over the release, not from the release alone.');
+
+(function () {
+const $ = (id) => document.getElementById(id);
+const f = HOT3D.fmt;
+const grid = $('grid');
+const state = { playing: true, part: '', obj: '' };
+let CLIPS = [];
+let cells = [];
+
+const io = 'IntersectionObserver' in window
+  ? new IntersectionObserver((es) => {
+      for (const e of es) {
+        const v = e.target;
+        if (e.isIntersecting && state.playing) v.play().catch(() => {});
+        else v.pause();
+      }
+    }, { rootMargin: '200px' })
+  : null;
+
+function build() {
+  grid.replaceChildren();
+  cells = [];
+  const shown = CLIPS.filter((c) =>
+    (!state.part || c.participant === state.part) &&
+    (!state.obj || c.objects.includes(state.obj)));
+
+  for (const c of shown) {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+
+    const v = document.createElement('video');
+    v.muted = true; v.loop = true; v.playsInline = true; v.controls = true;
+    v.preload = 'none';
+    v.src = `media/preprocess/${c.rec}.mp4`;
+    v.playbackRate = Number($('gSpeed').value) || 1;
+    // data values are untrusted text: set them as attributes and text, never as markup
+    v.setAttribute('aria-label', `${c.rec}, ${c.frames} frames, ${c.objects.join(' and ')}`);
+
+    const cap = document.createElement('div');
+    cap.className = 'cap';
+    const b = document.createElement('b');
+    b.textContent = c.rec;
+    const s = document.createElement('span');
+    s.className = 'obj';
+    s.textContent = `${f.n(c.frames)} frames · ${c.objects.join(', ')}`;
+    cap.append(b, s);
+
+    cell.append(v, cap);
+    grid.append(cell);
+    cells.push(v);
+    if (io) io.observe(v);
+  }
+
+  $('empty').hidden = shown.length > 0;
+  $('gCount').textContent = shown.length === CLIPS.length
+    ? `${shown.length} clips`
+    : `${shown.length} of ${CLIPS.length} clips`;
+}
+
+function fillFigures() {
+  const frames = CLIPS.reduce((a, c) => a + c.frames, 0);
+  const secs = CLIPS.map((c) => c.frames / 30).sort((a, b) => a - b);
+  const parts = [...new Set(CLIPS.map((c) => c.participant))].sort();
+  const objs = [...new Set(CLIPS.flatMap((c) => c.objects))].sort();
+  $('fClips').textContent = f.n(CLIPS.length);
+  $('fFrames').textContent = f.n(frames);
+  $('fMed').textContent = secs.length ? secs[Math.floor(secs.length / 2)].toFixed(1) : '—';
+  $('fPart').textContent = parts.length;
+  $('fObj').textContent = objs.length;
+
+  for (const p of parts) $('gPart').append(new Option(p, p));
+  for (const o of objs) $('gObj').append(new Option(o, o));
+}
+
+HOT3D.json('data/preprocessing/clips.json').then((payload) => {
+  CLIPS = payload.clips;
+  fillFigures();
+  build();
+  const p = payload.provenance;
+  $('prov').textContent =
+    `${f.n(CLIPS.length)} clips from the preprocessing run of ${p.run_date} ` +
+    `(job array ${p.slurm_array}, HumanEgo ${p.humanego_commit}), encoded ${p.rendered} at ` +
+    `${p.encode} from each window's overlay frames. ` +
+    `The other ${payload.without_window} recordings with ground truth produced no manipulation ` +
+    `window the pipeline could process, so they have no clip. ` +
+    `Built by scripts/hot3d_preprocess_clips.py, which runs where the output lives.`;
+}).catch((err) => {
+  $('prov').textContent = `Could not load data/preprocessing/clips.json: ${err.message}`;
+});
+
+$('gPlay').addEventListener('click', (e) => {
+  state.playing = !state.playing;
+  e.currentTarget.textContent = state.playing ? '⏸ pause all' : '▶ play all';
+  e.currentTarget.setAttribute('aria-pressed', String(state.playing));
+  for (const v of cells) {
+    if (!state.playing) { v.pause(); continue; }
+    const r = v.getBoundingClientRect();
+    if (r.bottom > 0 && r.top < innerHeight) v.play().catch(() => {});
+  }
+});
+$('gRestart').addEventListener('click', () => { for (const v of cells) v.currentTime = 0; });
+$('gSpeed').addEventListener('change', (e) => {
+  const rate = Number(e.target.value) || 1;
+  for (const v of cells) v.playbackRate = rate;
+});
+$('gPart').addEventListener('change', (e) => { state.part = e.target.value; build(); });
+$('gObj').addEventListener('change', (e) => { state.obj = e.target.value; build(); });
+})();
+</script>
+</body>
+</html>

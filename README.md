@@ -26,6 +26,8 @@ directories carries its own `LICENSE`; the details are in [`DATA_LICENSE.md`](DA
 | `gaze.html` | Yaw, pitch, depth and vergence |
 | `quality.html` | The seven masks, per recording and across the release |
 | `data.html` | What a recording folder holds and how this site was built from it |
+| `trackers.html` | MediaPipe, WiLoR and HaMeR scored against the mocap hands |
+| `preprocessing.html` | Each manipulation window, rectified upright, with the tracked points drawn on |
 
 ## Layout
 
@@ -40,6 +42,9 @@ data/objects/*.glb     object models, compacted for the web
 data/objects/points.json  400 surface points per model, for the 3D scene's object-point layer
 media/<SEQ>_rgb.mp4    704x704 H.264, 30 fps — frame i is row i of every payload array
 media/<SEQ>_*.jpg      poster frame and SLAM-camera stills
+media/preprocess/<SEQ>.mp4   the manipulation window with the tracked points drawn on, 640 px wide
+data/trackers/*.json   hand-tracker scores, one file per tracker (see its SCHEMA.md)
+data/preprocessing/clips.json  the clip index: frames, window bounds and objects per recording
 scripts/               the extraction pipeline (runs where the dataset is, not in the browser)
 ```
 
@@ -66,6 +71,16 @@ python scripts/hot3d_objects.py <dataset_dir>/assets/assets data/index.json data
 python scripts/hot3d_object_points.py data/objects.json data/objects data/objects/points.json
 ```
 
+The preprocessing clips come from a pipeline run over the release rather than from the release
+alone, so they are built separately, where that run's output lives:
+
+```bash
+python scripts/hot3d_preprocess_clips.py <runs_dir> <seqs.txt> media/preprocess -o data/preprocessing/clips.json
+```
+
+It encodes each recording's window frames into one clip and writes the index the page reads. It
+needs `imageio-ffmpeg` (or ffmpeg on PATH).
+
 `hot3d_extract.py` needs numpy; `hot3d_media.py` needs `projectaria-tools`, Pillow and ffmpeg
 (`imageio-ffmpeg` supplies a build with libx264); `hot3d_objects.py` needs trimesh,
 `fast-simplification` and Pillow on Python 3.10+. `hot3d_object_points.py` needs only numpy — it
@@ -80,6 +95,7 @@ reproducing each model's released `extent_m` (worst disagreement across the 33 m
 | `media/`, `data/seq/`, `data/index.json` | CC BY-SA 4.0 |
 | `data/hands/` | CC BY-NC-SA 4.0 — non-commercial |
 | `data/objects/` | CC BY-SA 4.0, and the models may not be sold |
+| `media/preprocess/`, `data/preprocessing/`, `data/trackers/` | CC BY-SA 4.0 — derived from the release's video and annotations |
 
 Hand annotations sit in their own directory because the release licenses them differently, and one
 file cannot carry both terms. MANO parameters are not republished here; their use is gated by the
